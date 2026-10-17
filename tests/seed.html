@@ -5,6 +5,7 @@
 <p>스크린샷용 예시 기록을 넣는 중… (테스트 전용, 실제 앱에서는 쓰지 않음)</p>
 <script type="module">
 // 사용법: tests/seed.html?go=meal%3Fq%3D죽  → 예시 기록을 넣고 ../index.html#meal?q=죽 으로 이동
+// &one=1 이면 체중 기록을 하나만 넣는다 (그래프 라벨 확인용)
 // 영양 수치는 앱에 넣은 식약처 데이터에서 그대로 가져온다.
 import { localDate, addDays } from '../js/calc.js';
 import { loadFoods, getFood } from '../js/foods.js';
@@ -28,6 +29,8 @@ add(0, PORRIDGE, 300, '08:00'); add(0, EGG, 110); add(0, POTATO, 50); add(0, PIZ
 const kg = [52.0, 52.1, 51.9, 52.3, 52.4, 52.3, 52.6, 52.8, 52.7, 53.0];
 const weights = kg.map((v, i) => ({ id: `w${i}`, date: addDays(today, -(kg.length - 1 - i) * 2), time: '08:00', kg: v, timing: '아침' }));
 weights.push({ id: 'we', date: addDays(today, -1), time: '20:00', kg: 53.6, timing: '저녁' });
+const params = new URLSearchParams(location.search);
+if (params.get('one')) weights.splice(0, weights.length, { id: 'w1', date: today, time: '08:00', kg: 30.9, timing: '아침' });
 
 localStorage.setItem('momMeal.v1', JSON.stringify({
   app: 'mom-meal', version: 1, meals, weights,
@@ -35,7 +38,7 @@ localStorage.setItem('momMeal.v1', JSON.stringify({
   servings: { [PORRIDGE]: 250, [RICE]: 210, [SOUP]: 250 },
   settings: { goalLow: 55, goalHigh: 57, kLow: 100, kHigh: 200, timings: ['아침', '저녁', '기타'] },
 }));
-const go = new URLSearchParams(location.search).get('go') || 'home';
+const go = params.get('go') || 'home';
 location.replace(`../index.html#${go}`);
 </script>
 </body>

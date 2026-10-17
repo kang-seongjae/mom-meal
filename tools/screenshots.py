@@ -19,6 +19,7 @@ SHOTS = {
     "6-settings": "settings",
     "7-empty-home": None,                                       # 기록이 하나도 없을 때
     "8-home-dark-mode-phone": "home",                           # 폰이 다크 모드일 때도 밝게 보이는지
+    "9-home-one-weight": "home&one=1",                          # 체중 기록이 하나뿐일 때 그래프 라벨
 }
 # 폰 다크 모드 + 브라우저의 '웹페이지 자동 어둡게' 기능을 켠 상태
 DARK_FLAGS = ["--force-dark-mode", "--enable-features=WebContentsForceDark"]
@@ -29,7 +30,11 @@ def main(out_dir):
     out.mkdir(parents=True, exist_ok=True)
     srv, base = start_server()
     for name, go in SHOTS.items():
-        inner = (f"{base}/tests/seed.html?go=" + urllib.parse.quote(go)) if go else f"{base}/index.html#home"
+        if go:
+            route, _, extra_q = go.partition("&")
+            inner = f"{base}/tests/seed.html?go=" + urllib.parse.quote(route) + (f"&{extra_q}" if extra_q else "")
+        else:
+            inner = f"{base}/index.html#home"
         # 헤드리스 창은 약 500px 보다 좁아지지 않으므로 390px 틀(frame.html) 안에서 찍고 잘라낸다.
         url = f"{base}/tests/frame.html?w={W}&h={H}&src=" + urllib.parse.quote(inner, safe="")
         png = out / (name + ".png")

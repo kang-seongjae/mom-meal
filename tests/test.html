@@ -189,6 +189,50 @@ await test('검색: 이름이 맞는 일반 음식이 먼저 나온다', () => {
   eq(searchFoods('   ').length, 0);
 });
 
+// 체중 그래프의 값 라벨이 잘리거나 겹치지 않는지 (실제로 그려서 글자 상자를 잰다)
+const { renderWeightChart } = await import('../js/chart.js');
+const css = document.createElement('link');
+css.rel = 'stylesheet'; css.href = '../app.css';
+document.head.append(css);
+await new Promise((r) => { css.onload = r; css.onerror = r; });
+
+const series = (kgs) => kgs.map((kg, i) => ({ date: addDays('2026-10-01', i * 2), kg }));
+const LABEL_CASES = [
+  ['기록 하나 (목표 없음)', [30.9], null, null, 350],
+  ['기록 하나 (목표 있음)', [30.9], 38, 40, 350],
+  ['기록 하나, 좁은 화면', [130.9], null, null, 280],
+  ['마지막 값이 가장 높음 (위쪽 끝)', [50, 51, 52, 53.9], null, null, 350],
+  ['마지막 값이 가장 낮음 (아래쪽 끝)', [53, 52, 51, 49.1], null, null, 350],
+  ['오른쪽 끝, 긴 라벨', [128.2, 129.5, 130.9], null, null, 300],
+  ['마지막 값이 목표 글자 바로 아래', [50, 52, 54, 56.9], 55, 57, 350],
+  ['목표 구간 안', [55.5, 56.1], 55, 57, 350],
+];
+for (const [name, kgs, gl, gh, width] of LABEL_CASES) {
+  await test(`그래프 라벨: ${name}`, () => {
+    const box = document.createElement('div');
+    box.style.width = `${width}px`;
+    document.body.append(box);
+    renderWeightChart(box, series(kgs), gl, gh);
+    const svg = box.querySelector('svg');
+    const [, , W, H] = svg.getAttribute('viewBox').split(' ').map(Number);
+    const label = svg.querySelector('.last-label');
+    const b = label.getBBox();
+    eq(label.textContent, `${kgs.at(-1)}kg`);
+    if (b.width === 0) throw new Error('라벨이 그려지지 않음');
+    const plotLeft = Number(svg.querySelector('.grid').getAttribute('x1'));
+    if (b.x < plotLeft) throw new Error(`왼쪽으로 넘침: ${b.x.toFixed(1)} < ${plotLeft}`);
+    if (b.x + b.width > W) throw new Error(`오른쪽으로 잘림: ${(b.x + b.width).toFixed(1)} > ${W}`);
+    if (b.y < 0) throw new Error(`위로 잘림: ${b.y.toFixed(1)}`);
+    if (b.y + b.height > H) throw new Error('아래로 잘림');
+    const hit = (o) => b.x < o.x + o.width && o.x < b.x + b.width && b.y < o.y + o.height && o.y < b.y + b.height;
+    for (const t of svg.querySelectorAll('.tick, .goal-label')) {
+      if (hit(t.getBBox())) throw new Error(`"${t.textContent}" 글자와 겹침`);
+    }
+    if (hit(svg.querySelectorAll('.dot')[kgs.length - 1].getBBox())) throw new Error('점을 가림');
+    box.remove();
+  });
+}
+
 const fails = results.filter((r) => r[0] === 'FAIL');
 document.getElementById('out').textContent =
   results.map((r) => r.join(' | ')).join('\n') +
