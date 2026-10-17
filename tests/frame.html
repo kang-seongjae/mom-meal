@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>폰 너비 미리보기</title>
+<style>html, body { margin: 0; background: #888; } iframe { border: 0; display: block; background: #fff; }</style>
+</head>
+<body>
+<!-- 헤드리스 브라우저는 창을 약 500px 아래로 줄이지 못해서, 실제 폰 너비(390px) 화면은 이 틀 안에서 찍는다. -->
+<script>
+const p = new URLSearchParams(location.search);
+const f = document.createElement('iframe');
+f.width = p.get('w') || 390;
+f.height = p.get('h') || 844;
+f.src = p.get('src');
+document.body.append(f);
+</script>
+</body>
+</html>

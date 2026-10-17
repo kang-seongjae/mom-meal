@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>화면 동작 테스트</title></head>
+<body>
+<pre id="out">실행 중…</pre>
+<iframe id="app" width="390" height="844"></iframe>
+<script type="module">
+// 실제 앱을 틀 안에 띄워 버튼을 눌러 보고, 저장된 기록과 화면 글자를 확인한다.
+const results = [];
+const frame = document.getElementById('app');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function waitFor(fn, ms = 8000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    try { const v = fn(); if (v) return v; } catch {}
+    await sleep(50);
+  }
+  throw new Error('시간 초과');
+}
+async function test(name, fn) {
+  document.getElementById('out').textContent = results.map((r) => r.join(' | ')).join('\n') + `\n진행 중: ${name}`;
+  try { await fn(); results.push(['PASS', name]); } catch (e) { results.push(['FAIL', name, e.message]); }
+}
+const doc = () => frame.contentDocument;
+const text = () => doc().body.innerText;
+const stored = () => JSON.parse(localStorage.getItem('momMeal.v1') || '{}');
+let loads = 0;
+async function open(hash) {
+  const before = frame.contentDocument;
+  frame.src = `../index.html?load=${++loads}#${hash}`; // 해시만 바꾸면 새로 열리지 않으므로 매번 다시 연다
+  await waitFor(() => doc() !== before && doc().readyState === 'complete' && doc().querySelector('#view').children.length);
+}
+
+localStorage.clear();
+
+await test('식사 기록: 양(150g) 고르고 기록하면 저장되고 오늘 합계에 반영', async () => {
+  await open('meal?food=D102-053000000-0001'); // 가래떡 100g당 195kcal, 단백질 3.92g, 칼륨 23mg
+  const btn = await waitFor(() => [...doc().querySelectorAll('.amount')].find((b) => b.textContent.includes('150g')));
+  btn.click();
+  await waitFor(() => doc().querySelector('.result-box').textContent.includes('293')); // 195*1.5=292.5
+  doc().querySelector('#save-meal').click();
+  const m = await waitFor(() => stored().meals?.[0]);
+  if (m.amount !== 150 || m.per100.kcal !== 195 || m.per100.potassium !== 23) throw new Error(JSON.stringify(m));
+  await open('home');
+  await waitFor(() => text().includes('293') && text().includes('5.9')); // 3.92*1.5=5.88
+});
+
+await test('칼륨 정보 없는 음식: 화면에 "칼륨 정보 없음", 저장값은 null', async () => {
+  await open('meal?food=D202-120000000-4493');
+  await waitFor(() => doc().querySelector('.knote.k-unknown')?.textContent.includes('칼륨 정보 없음'));
+  doc().querySelector('#save-meal').click();
+  await waitFor(() => stored().meals?.length === 2);
+  if (stored().meals[1].per100.potassium !== null) throw new Error('null 이 아님');
+  await open('meal');
+  await waitFor(() => [...doc().querySelectorAll('.kbadge')].some((b) => b.textContent === '칼륨 정보 없음'));
+});
+
+await test('칼륨 많은 음식: 부드러운 안내가 나오고 기록은 막지 않음', async () => {
+  await open('meal?food=D711-508000000-0001'); // 감자조림 100ml당 칼륨 429mg
+  await waitFor(() => doc().querySelector('.knote.k-high')?.textContent.includes('기록은 그대로'));
+  doc().querySelector('#save-meal').click();
+  await waitFor(() => stored().meals?.length === 3);
+});
+
+await test('한 그릇 무게 설정: 250 으로 정하면 "1 그릇 (250)" 버튼이 생김', async () => {
+  await open('meal?food=D704-212000000-0001'); // 흰죽
+  await waitFor(() => doc().querySelector('#serving'));
+  doc().querySelector('#serving').value = '250';
+  doc().querySelector('#apply-fine').click();
+  await waitFor(() => [...doc().querySelectorAll('.amount')].some((b) => b.textContent.includes('1 그릇') && /250(g|ml)/.test(b.textContent)));
+  if (stored().servings['D704-212000000-0001'] !== 250) throw new Error('저장 안 됨');
+});
+
+await test('즐겨찾기: 추가하면 식사 화면 위에 버튼이 생김', async () => {
+  await open('meal?food=D704-212000000-0001');
+  (await waitFor(() => doc().querySelector('#fav'))).click();
+  await open('meal');
+  await waitFor(() => [...doc().querySelectorAll('.fav')].some((b) => b.textContent === '흰죽'));
+});
+
+await test('체중 기록: 목표를 입력하기 전에는 설정 안내가 나온다', async () => {
+  await open('weight');
+  if (doc().querySelector('#kg').value !== '') throw new Error('기본 체중이 채워져 있음');
+  doc().querySelector('#kg').value = '52.4';
+  [...doc().querySelectorAll('.chip')].find((b) => b.textContent === '저녁').click();
+  doc().querySelector('#save-weight').click();
+  const w = await waitFor(() => stored().weights?.[0]);
+  if (w.kg !== 52.4 || w.timing !== '저녁') throw new Error(JSON.stringify(w));
+  await waitFor(() => doc().querySelector('.goal-line a[href="#settings"]'));
+});
+
+await test('설정: 목표 체중(빈칸 시작)과 측정 시점을 입력하면 홈과 체중 화면에 반영', async () => {
+  await open('settings');
+  const low = await waitFor(() => doc().querySelector('#goalLow'));
+  if (low.value !== '' || doc().querySelector('#goalHigh').value !== '') throw new Error('목표 기본값이 있음');
+  low.value = '55';
+  doc().querySelector('#goalHigh').value = '57';
+  doc().querySelector('#timings').value = '아침, 저녁, 운동 후';
+  doc().querySelector('#save-settings').click();
+  await waitFor(() => stored().settings?.goalLow === 55 && stored().settings.goalHigh === 57);
+  await open('home');
+  await waitFor(() => text().includes('목표 55~57kg까지') && text().includes('2.6kg'));
+  await open('weight');
+  await waitFor(() => [...doc().querySelectorAll('.chip')].map((b) => b.textContent).join('|') === '아침|저녁|운동 후');
+});
+
+await test('검색: "죽" 을 치면 결과가 나온다', async () => {
+  await open('meal');
+  const q = await waitFor(() => doc().querySelector('#q'));
+  q.value = '죽';
+  q.dispatchEvent(new Event('input'));
+  await waitFor(() => doc().querySelectorAll('.result').length > 5);
+});
+
+// 오프라인 동작은 tools/run_tests.py 가 서버를 끈 뒤 다시 열어서 확인한다.
+
+localStorage.clear();
+const fails = results.filter((r) => r[0] === 'FAIL');
+document.getElementById('out').textContent =
+  results.map((r) => r.join(' | ')).join('\n') + `\nSUMMARY: ${results.length - fails.length} passed, ${fails.length} failed`;
+</script>
+</body>
+</html>

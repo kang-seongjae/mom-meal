@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>스크린샷용 예시 기록</title></head>
+<body>
+<p>스크린샷용 예시 기록을 넣는 중… (테스트 전용, 실제 앱에서는 쓰지 않음)</p>
+<script type="module">
+// 사용법: tests/seed.html?go=meal%3Fq%3D죽  → 예시 기록을 넣고 ../index.html#meal?q=죽 으로 이동
+// 영양 수치는 앱에 넣은 식약처 데이터에서 그대로 가져온다.
+import { localDate, addDays } from '../js/calc.js';
+import { loadFoods, getFood } from '../js/foods.js';
+
+await loadFoods('../data/foods.json');
+const today = localDate();
+const meals = [];
+const add = (daysAgo, code, amount, time = '12:00') => {
+  const f = getFood(code);
+  meals.push({
+    id: `${code}-${daysAgo}-${meals.length}`, date: addDays(today, -daysAgo), time, code: f.code, name: f.name,
+    rest: f.rest, unit: f.unit, amount, per100: { kcal: f.kcal, protein: f.protein, potassium: f.potassium },
+  });
+};
+const RICE = 'D601-022000000-0001', PORRIDGE = 'D704-212000000-0001', EGG = 'D407-317000000-0001';
+const SOUP = 'D505-223000000-0001', POTATO = 'D711-508000000-0001', PIZZA = 'D202-120000000-4493';
+for (let d = 1; d <= 7; d++) { add(d, PORRIDGE, 250, '08:00'); add(d, EGG, 100); add(d, RICE, 150, '18:00'); }
+add(0, PORRIDGE, 300, '08:00'); add(0, EGG, 110); add(0, POTATO, 50); add(0, PIZZA, 120, '15:00'); add(0, RICE, 200, '18:00');
+
+// 화면 확인용 가상의 예시 값 (실제 사람의 기록이 아님)
+const kg = [52.0, 52.1, 51.9, 52.3, 52.4, 52.3, 52.6, 52.8, 52.7, 53.0];
+const weights = kg.map((v, i) => ({ id: `w${i}`, date: addDays(today, -(kg.length - 1 - i) * 2), time: '08:00', kg: v, timing: '아침' }));
+weights.push({ id: 'we', date: addDays(today, -1), time: '20:00', kg: 53.6, timing: '저녁' });
+
+localStorage.setItem('momMeal.v1', JSON.stringify({
+  app: 'mom-meal', version: 1, meals, weights,
+  favorites: [PORRIDGE, EGG, RICE, SOUP],
+  servings: { [PORRIDGE]: 250, [RICE]: 210, [SOUP]: 250 },
+  settings: { goalLow: 55, goalHigh: 57, kLow: 100, kHigh: 200, timings: ['아침', '저녁', '기타'] },
+}));
+const go = new URLSearchParams(location.search).get('go') || 'home';
+location.replace(`../index.html#${go}`);
+</script>
+</body>
+</html>
