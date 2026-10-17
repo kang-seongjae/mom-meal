@@ -6,7 +6,9 @@
 <style>html, body { margin: 0; background: #888; } iframe { border: 0; display: block; background: #fff; }</style>
 </head>
 <body>
-<!-- 헤드리스 브라우저는 창을 약 500px 아래로 줄이지 못해서, 실제 폰 너비(390px) 화면은 이 틀 안에서 찍는다. -->
+<!-- 헤드리스 브라우저는 창을 약 500px 아래로 줄이지 못해서, 실제 폰 너비(390px) 화면은 이 틀 안에서 찍는다.
+     click=선택자1|선택자2 : 화면이 열린 뒤 차례로 누른다 (스크린샷용)
+     hold=1               : 잠깐 뜨는 축하 문구가 사라지지 않게 붙잡아 둔다 (스크린샷용) -->
 <script>
 const p = new URLSearchParams(location.search);
 const f = document.createElement('iframe');
@@ -14,6 +16,22 @@ f.width = p.get('w') || 390;
 f.height = p.get('h') || 844;
 f.src = p.get('src');
 document.body.append(f);
+const clicks = (p.get('click') || '').split('|').filter(Boolean);
+if (clicks.length || p.get('hold')) {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  (async () => {
+    await wait(3000);
+    for (const sel of clicks) {
+      f.contentDocument.querySelector(sel)?.click();
+      await wait(700);
+    }
+    if (p.get('hold')) {
+      const st = f.contentDocument.createElement('style');
+      st.textContent = '.celebrate[hidden]{display:flex!important}.celebrate.pop{animation:none!important}';
+      f.contentDocument.head.append(st);
+    }
+  })();
+}
 </script>
 </body>
 </html>

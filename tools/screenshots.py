@@ -25,6 +25,7 @@ SHOTS = {
     "12-recipe-editor": "recipe?id=my-sample-recipe",
     "13-label-form": "label?id=new",                             # 직접 입력: 빈칸으로 시작
     "14-amount-label-draft": "meal?food=my-sample-draft",        # 수치 입력 전에는 기록 불가
+    "15-celebrate": "meal?food=D327-758010000-0001&@click=%23save-meal&hold=1",  # 기록하면 뜨는 축하 문구
 }
 # 폰 다크 모드 + 브라우저의 '웹페이지 자동 어둡게' 기능을 켠 상태
 DARK_FLAGS = ["--force-dark-mode", "--enable-features=WebContentsForceDark"]
@@ -35,13 +36,19 @@ def main(out_dir):
     out.mkdir(parents=True, exist_ok=True)
     srv, base = start_server()
     for name, go in SHOTS.items():
+        frame_q = ""
         if go:
-            route, _, extra_q = go.partition("&")
-            inner = f"{base}/tests/seed.html?go=" + urllib.parse.quote(route) + (f"&{extra_q}" if extra_q else "")
+            route, _, rest = go.partition("&")
+            # "@"로 시작하는 값은 틀(frame.html)에 넘기고, 나머지는 예시 기록 페이지(seed.html)에 넘긴다
+            extra = [x for x in rest.split("&") if x and not x.startswith("@")]
+            frame_q = "".join(f"&{x[1:]}" for x in rest.split("&") if x.startswith("@"))
+            frame_q += "".join(f"&{x}" for x in extra if x.startswith("hold="))
+            seed_q = [x for x in extra if not x.startswith("hold=")]
+            inner = f"{base}/tests/seed.html?go=" + urllib.parse.quote(route) + "".join(f"&{x}" for x in seed_q)
         else:
             inner = f"{base}/index.html#home"
         # 헤드리스 창은 약 500px 보다 좁아지지 않으므로 390px 틀(frame.html) 안에서 찍고 잘라낸다.
-        url = f"{base}/tests/frame.html?w={W}&h={H}&src=" + urllib.parse.quote(inner, safe="")
+        url = f"{base}/tests/frame.html?w={W}&h={H}{frame_q}&src=" + urllib.parse.quote(inner, safe="")
         png = out / (name + ".png")
         with tempfile.TemporaryDirectory() as prof:
             extra = DARK_FLAGS if "dark-mode" in name else []

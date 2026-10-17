@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>글씨·버튼·대비 측정</title></head>
+<body>
+<pre id="out">실행 중…</pre>
+<iframe id="app" width="390" height="844"></iframe>
+<script type="module">
+// 화면마다 보이는 글자의 크기와 글자-배경 대비, 누르는 요소의 크기를 잰다.
+// 디자인을 바꿀 때 이 값이 이전보다 작아지거나 약해지지 않았는지 확인하는 용도.
+const SCREENS = ['home', 'meal?q=죽', 'meal?food=D711-508000000-0001', 'meal?food=my-sample-recipe',
+  'weight', 'settings', 'recipe?id=my-sample-recipe', 'label?id=new'];
+const frame = document.getElementById('app');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function lum([r, g, b]) {
+  const c = [r, g, b].map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const rgba = (s) => (s.match(/[\d.]+/g) || []).map(Number);
+// 반투명 배경은 아래 배경과 섞어서 실제 색을 구한다
+function effectiveBg(el, win) {
+  const layers = [];
+  for (let e = el; e; e = e.parentElement) {
+    const cs = win.getComputedStyle(e);
+    const c = rgba(cs.backgroundColor);
+    if (c.length >= 3 && (c[3] ?? 1) > 0) layers.push(c);
+    if (c.length >= 3 && (c[3] ?? 1) === 1) break;
+  }
+  let col = [255, 255, 255];
+  for (const c of layers.reverse()) {
+    const a = c[3] ?? 1;
+    col = col.map((v, i) => v * (1 - a) + c[i] * a);
+  }
+  return col;
+}
+function visible(el, win) {
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return false;
+  for (let e = el; e; e = e.parentElement) {
+    const cs = win.getComputedStyle(e);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) return false;
+    if (e.hidden) return false;
+  }
+  return !el.closest('details:not([open]) > :not(summary)');
+}
+
+async function measure(hash) {
+  const before = frame.contentDocument;
+  frame.src = `seed.html?go=${encodeURIComponent(hash)}`;
+  for (let i = 0; i < 200; i++) {
+    await sleep(50);
+    const d = frame.contentDocument;
+    if (d && d !== before && d.location.pathname.endsWith('index.html') && d.readyState === 'complete') break;
+  }
+  await sleep(1500);
+  const win = frame.contentWindow, doc = frame.contentDocument;
+  let minFont = Infinity, minFontText = '', minContrast = Infinity, minContrastText = '';
+  let minTarget = Infinity, minTargetText = '';
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = n.textContent.trim();
+    const el = n.parentElement;
+    if (!t || !el || el.closest('script,style,svg,[aria-hidden="true"]') || !visible(el, win)) continue;
+    if (!/[가-힣A-Za-z0-9]/.test(t)) continue;  // 이모지·기호만 있는 글자는 장식
+    const cs = win.getComputedStyle(el);
+    const fs = parseFloat(cs.fontSize);
+    if (fs < minFont) { minFont = fs; minFontText = t.slice(0, 20); }
+    if (rgba(cs.backgroundImage).length) continue;
+    const c = ratio(rgba(cs.color), effectiveBg(el, win));
+    if (c < minContrast) { minContrast = c; minContrastText = t.slice(0, 20); }
+  }
+  // 입력칸(input)은 바깥 label 크기가 아니라 칸 자체 크기를 잰다
+  for (const el of doc.querySelectorAll('button, a.btn, .tabbar a, input:not([type=file]):not([type=checkbox]), .settings-link')) {
+    if (!visible(el, win)) continue;
+    const r = el.getBoundingClientRect();
+    const size = Math.min(r.height, r.width);
+    if (size < minTarget) { minTarget = size; minTargetText = (el.textContent || el.placeholder || el.id || el.className).trim().slice(0, 20); }
+  }
+  const body = parseFloat(win.getComputedStyle(doc.body).fontSize);
+  return { screen: hash, bodyFont: body, minFont, minFontText, minContrast: Math.round(minContrast * 100) / 100, minContrastText,
+    minTarget: Math.round(minTarget), minTargetText };
+}
+
+const rows = [];
+for (const s of SCREENS) rows.push(await measure(s));
+document.getElementById('out').textContent = JSON.stringify(rows, null, 1) + '\nDONE';
+</script>
+</body>
+</html>

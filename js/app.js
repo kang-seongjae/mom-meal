@@ -6,6 +6,7 @@ import {
 import { load, save, newId, exportJson, exportSettingsJson, readBackupFile } from './store.js';
 import { loadFoods, getFood, getMeta, searchFoods, setCustomFoods, SOURCE_LABEL } from './foods.js';
 import { renderWeightChart } from './chart.js';
+import { foodEmoji, goalProgress } from './look.js';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -37,6 +38,29 @@ function toast(msg) {
   t.hidden = false;
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => { t.hidden = true; }, 2600);
+}
+
+// 꾸밈용 이모지. 화면 읽기 프로그램은 읽지 않는다.
+const emoji = (e) => `<span class="emo" aria-hidden="true">${e}</span>`;
+const foodIcon = (f) => emoji(foodEmoji(f));
+
+// 음식을 기록하면 잠깐 뜨는 축하 문구. 기록할 때마다 돌아가며 보여 준다.
+const CHEERS = [
+  ['🎉', '잘 드셨어요!'],
+  ['😋', '맛있게 드셨네요!'],
+  ['🌷', '한 입 한 입 정말 잘하셨어요!'],
+  ['💛', '오늘도 힘내셨어요!'],
+];
+function celebrate() {
+  const [e, msg] = CHEERS[state.meals.length % CHEERS.length];
+  const c = $('#celebrate');
+  c.innerHTML = `<span class="celebrate-emoji" aria-hidden="true">${e}</span><span>${msg}</span>`;
+  c.hidden = false;
+  c.classList.remove('pop');
+  void c.offsetWidth; // 다시 기록해도 움직임이 처음부터 나오도록
+  c.classList.add('pop');
+  clearTimeout(celebrate.timer);
+  celebrate.timer = setTimeout(() => { c.hidden = true; }, 1800);
 }
 
 // 자료에는 반찬도 100ml 기준인 것이 있어서, 단위가 아니라 음료인지로 정한다.
@@ -121,18 +145,32 @@ function renderHome() {
 
   let weightHtml;
   if (!w) {
-    weightHtml = `<p class="big-label">아직 체중 기록이 없어요</p>
-      <a class="btn btn-secondary" href="#weight">체중 기록하기</a>`;
+    weightHtml = `<p class="big-label">${emoji('⚖️')} 아직 체중 기록이 없어요</p>
+      <p class="muted">한 번 재 보시면 여기에 크게 보여 드릴게요.</p>
+      <a class="btn btn-secondary" href="#weight">체중 기록하러 가기</a>`;
   } else {
     const [, wm, wd] = w.date.split('-').map(Number);
+    const p = goalProgress(state.weights, state.settings.goalLow);
+    let progressHtml = '';
+    if (p) {
+      const howFar = p.percent >= 100 ? '목표에 닿았어요!'
+        : p.gained > 0 ? `${p.gained}kg 늘었어요` : '함께 가 봐요';
+      progressHtml = `
+        <div class="progress" role="progressbar" aria-label="목표 체중까지 온 정도" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p.percent}">
+          <div class="progress-fill" style="width:${Math.max(p.percent, 4)}%"><span class="progress-mark" aria-hidden="true">🌱</span></div>
+          <span class="progress-goal" aria-hidden="true">🌷</span>
+        </div>
+        <p class="progress-text" title="처음 ${p.startKg}kg (${p.startDate})"><b>${p.percent}%</b> 왔어요 · ${howFar}</p>`;
+    }
     weightHtml = `
-      <p class="label">지금 체중 <span class="sub">(${wm}/${wd} ${esc(w.timing)})</span></p>
+      <p class="label">${emoji('⚖️')} 지금 체중 <span class="sub">(${wm}/${wd} ${esc(w.timing)})</span></p>
       <p class="hero"><b>${w.kg}</b><span>kg</span></p>
       <p class="goal-line">${!goal
         ? '<a href="#settings">설정에서 목표 체중을 입력해 주세요</a>'
         : remain > 0
           ? `목표 ${goal}까지 <b>${remain}kg</b> 남았어요`
-          : `목표 ${goal}에 도착했어요!`}</p>`;
+          : `목표 ${goal}에 도착했어요!`}</p>
+      ${progressHtml}`;
   }
 
   const timings = [...new Set(state.weights.map((x) => x.timing))];
@@ -158,26 +196,29 @@ function renderHome() {
   view.innerHTML = `
     <header class="top">
       <p class="date">${d.getMonth() + 1}월 ${d.getDate()}일 ${WEEKDAYS[d.getDay()]}요일</p>
-      <a class="settings-link" href="#settings" aria-label="설정">설정</a>
+      <a class="settings-link" href="#settings" aria-label="설정">${emoji('⚙️')} 설정</a>
     </header>
-    <p class="cheer">${esc(cheerMessage(cmp))}</p>
-    <section class="card">
+    <p class="cheer">${emoji('🌼')} ${esc(cheerMessage(cmp))}</p>
+    <section class="card card-peach">
       ${weightHtml}
-      ${timings.length > 1 ? `<div class="chips small" role="group" aria-label="그래프 측정 시점">
-        ${timings.map((x) => `<button class="chip ${x === chartTiming ? 'on' : ''}" data-timing="${esc(x)}">${esc(x)}</button>`).join('')}
-      </div>` : ''}
-      <div id="chart" class="chart-box"></div>
     </section>
-    <section class="card">
-      <p class="label">오늘 드신 양</p>
+    <section class="card card-butter">
+      <p class="label">${emoji('🍚')} 오늘 드신 양</p>
       <div class="totals">
         <div><b>${kcalText(t.kcal)}</b><span>kcal</span></div>
         <div><b>${gText(t.protein)}</b><span>g 단백질</span></div>
       </div>
-      ${praise.length ? `<p class="praise">👏 ${praise.join(', ')}!</p>` : ''}
+      ${praise.length ? `<p class="praise">${emoji('👏')} ${praise.join(', ')}!</p>` : ''}
       ${compareHtml}
     </section>
-    <a class="btn btn-primary" href="#meal">식사 기록하기</a>`;
+    <a class="btn btn-primary" href="#meal">${emoji('🍽️')} 식사 기록하기</a>
+    <section class="card card-sky">
+      <p class="label">${emoji('📈')} 체중 그래프</p>
+      ${timings.length > 1 ? `<div class="chips small" role="group" aria-label="그래프 측정 시점">
+        ${timings.map((x) => `<button class="chip ${x === chartTiming ? 'on' : ''}" data-timing="${esc(x)}">${esc(x)}</button>`).join('')}
+      </div>` : ''}
+      <div id="chart" class="chart-box"></div>
+    </section>`;
 
   view.querySelectorAll('[data-timing]').forEach((b) => b.addEventListener('click', () => {
     chartTiming = b.dataset.timing;
@@ -202,7 +243,7 @@ function resultItem(f, attr = 'data-code') {
     ? `${esc(f.rest || f.origin)} · ${basisText(f)}당 ${kcalText(f.kcal)}kcal`
     : `${esc(f.origin)} · <span class="tag">수치 입력 필요</span>`;
   return `<li><button class="result" ${attr}="${esc(f.code)}">
-    <b>${esc(f.name)}</b><span class="rest">${info}</span>
+    ${foodIcon(f)}<span class="result-text"><b>${esc(f.name)}</b><span class="rest">${info}</span></span>
   </button></li>`;
 }
 
@@ -210,28 +251,32 @@ function renderMeal() {
   const favs = state.favorites.map(getFood).filter(Boolean);
   const todays = state.meals.filter((m) => m.date === today());
 
+  const tones = ['peach', 'mint', 'sky', 'butter'];
   view.innerHTML = `
-    <h1>식사 기록</h1>
+    <h1>${emoji('🍚')} 식사 기록</h1>
     ${favs.length ? `<section>
-      <h2>즐겨찾기</h2>
-      <div class="fav-grid">${favs.map((f) => `<button class="fav" data-code="${esc(f.code)}">${esc(f.name)}</button>`).join('')}</div>
+      <h2>${emoji('⭐')} 즐겨찾기</h2>
+      <div class="fav-grid">${favs.map((f, i) => `<button class="fav fav-${tones[i % tones.length]}" data-code="${esc(f.code)}">
+        <span class="fav-emoji" aria-hidden="true">${foodEmoji(f)}</span><span class="fav-name">${esc(f.name)}</span></button>`).join('')}</div>
     </section>` : ''}
     <section>
-      <h2>음식 찾기</h2>
-      <input id="q" class="search" type="search" placeholder="음식 이름 (예: 죽, 계란)" autocomplete="off" value="${esc(lastQuery)}">
+      <h2>${emoji('🔍')} 음식 찾기</h2>
+      <input id="q" class="search" type="search" placeholder="음식 이름을 써 보세요 (예: 죽, 계란)" autocomplete="off" value="${esc(lastQuery)}">
       <ul id="results" class="results"></ul>
     </section>
-    <section>
-      <h2>오늘 드신 음식</h2>
+    <section class="card card-cream">
+      <h2>${emoji('🍽️')} 오늘 드신 음식</h2>
       ${todays.length ? `<ul class="list">${todays.map((m) => {
         const n = mealNutrients(m);
+        const f = getFood(m.code) || { name: m.name, unit: m.unit };
         return `<li>
+          ${foodIcon(f)}
           <div class="li-main"><b>${esc(m.name)}</b>
             <span>${esc(amountText(m.unit, m.amount, m.amountLabel))} · ${kcalText(n.kcal)}kcal · 단백질 ${gText(n.protein)}g</span>
             ${potassiumBadge(n.potassium, n.potassiumPartial)}</div>
           <button class="btn-text" data-del-meal="${m.id}">지우기</button>
         </li>`;
-      }).join('')}</ul>` : '<p class="muted">아직 기록이 없어요.</p>'}
+      }).join('')}</ul>` : '<p class="muted">아직 기록이 없어요. 드신 걸 하나씩 남겨 볼까요?</p>'}
     </section>`;
 
   const q = $('#q');
@@ -244,7 +289,7 @@ function renderMeal() {
     }
     const hits = searchFoods(q.value);
     results.innerHTML = q.value.trim() && !hits.length
-      ? '<li class="muted">찾는 음식이 없어요. 다른 이름으로 찾아보세요.</li>'
+      ? '<li class="muted">찾는 음식이 없어요. 다른 이름으로도 찾아볼까요?</li>'
       : hits.map((f) => resultItem(f)).join('');
   };
   q.addEventListener('input', doSearch);
@@ -345,7 +390,7 @@ function openAmountSheet(code) {
 
     sheet.innerHTML = `
       <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-        <h2 id="sheet-title">${esc(food.name)}</h2>
+        <h2 id="sheet-title">${foodIcon(food)} ${esc(food.name)}</h2>
         <p class="rest">${esc(food.rest || food.origin)}</p>
         ${canRecord ? `<p class="label">얼마나 드셨어요?</p>
         <div class="amounts">${opts.map((o, i) => `<button class="amount ${o.amount === amount && (o.amountLabel ?? null) === amountLabel ? 'on' : ''}" data-i="${i}">
@@ -374,7 +419,9 @@ function openAmountSheet(code) {
       persist();
       closeSheet();
       lastQuery = '';
-      toast('기록했어요! 👏');
+      celebrate();
+      // 주소에 음식이 지정된 채로 열렸으면(#meal?food=…) 지워야 기록 뒤에 창이 다시 열리지 않는다
+      if (location.hash.includes('food=')) history.replaceState(null, '', '#meal');
       route();
     });
     $('#fav', sheet).addEventListener('click', () => {
@@ -668,8 +715,8 @@ function renderWeight() {
   const recent = [...state.weights].sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || ''))).slice(0, 10);
 
   view.innerHTML = `
-    <h1>체중 기록</h1>
-    <section class="card">
+    <h1>${emoji('⚖️')} 체중 기록</h1>
+    <section class="card card-mint">
       <p class="label">몸무게</p>
       <div class="stepper">
         <button class="step" id="minus" aria-label="0.1 kg 빼기">−</button>
@@ -685,7 +732,7 @@ function renderWeight() {
       <button class="btn btn-primary" id="save-weight">저장하기</button>
     </section>
     <section>
-      <h2>최근 기록</h2>
+      <h2>${emoji('🗓️')} 최근 기록</h2>
       ${recent.length ? `<ul class="list">${recent.map((w) => {
         const [, m, d] = w.date.split('-').map(Number);
         return `<li><div class="li-main"><b>${w.kg}kg</b><span>${m}월 ${d}일 · ${esc(w.timing)}</span></div>
@@ -713,7 +760,7 @@ function renderWeight() {
     }
     state.weights.push({ id: newId(), date, time: date === today() ? nowTime() : '', kg: v, timing });
     persist();
-    toast('체중을 저장했어요. 고마워요!');
+    toast('체중을 남겨 주셔서 고마워요! 💛');
     location.hash = '#home';
   });
   view.querySelectorAll('[data-del-weight]').forEach((b) => b.addEventListener('click', () => {
@@ -736,8 +783,8 @@ function renderSettings() {
   const labels = state.customFoods.filter((c) => c.kind === 'label');
 
   view.innerHTML = `
-    <header class="top"><h1>설정</h1><a class="settings-link" href="#home">닫기</a></header>
-    <p class="muted">보호자용 설정이에요.</p>
+    <header class="top"><h1>${emoji('⚙️')} 설정</h1><a class="settings-link" href="#home">닫기</a></header>
+    <p class="muted">보호자님이 정해 두시는 곳이에요.</p>
 
     <section class="card">
       <h2>목표 체중</h2>

@@ -75,7 +75,7 @@ await test('즐겨찾기: 추가하면 식사 화면 위에 버튼이 생김', a
   await open('meal?food=D704-212000000-0001');
   (await waitFor(() => doc().querySelector('#fav'))).click();
   await open('meal');
-  await waitFor(() => [...doc().querySelectorAll('.fav')].some((b) => b.textContent === '흰죽'));
+  await waitFor(() => [...doc().querySelectorAll('.fav-name')].some((b) => b.textContent === '흰죽'));
 });
 
 await test('체중 기록: 목표를 입력하기 전에는 설정 안내가 나온다', async () => {
@@ -176,7 +176,7 @@ await test('직접 입력 음식: 라벨 수치를 채우면 "1팩"으로 기록
     throw new Error(JSON.stringify(m));
   }
   await open('meal');
-  await waitFor(() => [...doc().querySelectorAll('.fav')].some((b) => b.textContent === '영양음료(테스트)'));
+  await waitFor(() => [...doc().querySelectorAll('.fav-name')].some((b) => b.textContent === '영양음료(테스트)'));
 });
 
 let oilCode;
@@ -222,7 +222,7 @@ await test('직접 만든 음식: 재료 3개로 1인분 저장 → 즐겨찾기
   if (!stored().favorites.includes(r.code)) throw new Error('즐겨찾기 안 됨');
 
   await open('meal');
-  (await waitFor(() => [...doc().querySelectorAll('.fav')].find((b) => b.textContent === '계란밥(테스트)'))).click();
+  (await waitFor(() => [...doc().querySelectorAll('.fav-name')].find((b) => b.textContent === '계란밥(테스트)'))).click();
   await waitFor(() => doc().querySelector('.amount.on')?.textContent.includes('1인분'));
   const box = doc().querySelector('.result-box').textContent;
   if (!box.includes(`${Math.round(expectKcal)} kcal`) || !box.includes('칼륨 일부 정보 없음')) throw new Error(box);
@@ -313,7 +313,43 @@ await test('설정만 내보내기 → 다른 폰에서 불러오기: 기록은 
   s = stored();
   if (s.customFoods.length !== 2 || s.favorites.length !== 3 || s.meals.length !== 1) throw new Error(JSON.stringify(s));
   await open('meal');
-  await waitFor(() => [...doc().querySelectorAll('.fav')].map((b) => b.textContent).join('|') === '쌀밥|라벨 음식(테스트)|만든 음식(테스트)');
+  await waitFor(() => [...doc().querySelectorAll('.fav-name')].map((b) => b.textContent).join('|') === '쌀밥|라벨 음식(테스트)|만든 음식(테스트)');
+});
+
+await test('홈 진행 막대·즐겨찾기 이모지·기록 축하 문구', async () => {
+  localStorage.setItem('momMeal.v1', JSON.stringify({
+    app: 'mom-meal', version: 1, meals: [], servings: {}, units: {}, customFoods: [],
+    favorites: [RICE, EGG],
+    weights: [{ id: 'w1', date: '2026-10-01', time: '08:00', kg: 52, timing: '아침' },
+      { id: 'w2', date: '2026-10-10', time: '08:00', kg: 53, timing: '아침' }],
+    settings: { goalLow: 55, goalHigh: 57, kLow: 100, kHigh: 200, timings: ['아침', '저녁', '기타'] },
+  }));
+  await open('home');
+  const bar = await waitFor(() => doc().querySelector('.progress[role="progressbar"]'));
+  if (bar.getAttribute('aria-valuenow') !== '33' || !text().includes('33%')) throw new Error(bar.outerHTML);
+  if (!text().includes('목표 55~57kg까지') || !text().includes('2kg')) throw new Error('남은 양 표시 없음');
+  // 순서: 체중 카드 → 오늘 드신 양 → (기록 버튼) → 그래프
+  const order = [...doc().querySelectorAll('.card')].map((c) => c.className);
+  if (order.join('|') !== 'card card-peach|card card-butter|card card-sky') throw new Error(order.join('|'));
+  await open('meal');
+  const favs = await waitFor(() => doc().querySelectorAll('.fav').length === 2 && [...doc().querySelectorAll('.fav')]);
+  const icons = favs.map((b) => b.querySelector('.fav-emoji').textContent).join('');
+  if (icons !== '🍚🥚') throw new Error(icons);
+  favs[0].click();
+  await waitFor(() => doc().querySelector('#save-meal'));
+  doc().querySelector('#save-meal').click();
+  const c = await waitFor(() => !doc().querySelector('#celebrate').hidden && doc().querySelector('#celebrate'));
+  if (!/잘 드셨어요|맛있게 드셨네요|잘하셨어요|힘내셨어요/.test(c.textContent)) throw new Error(c.textContent);
+  if (c.getAttribute('role') !== 'status') throw new Error('화면 읽기 프로그램 안내 없음');
+  if (stored().meals.length !== 1) throw new Error('기록 안 됨');
+
+  // 음식이 지정된 주소(#meal?food=…)로 열어 기록해도 창이 다시 열리지 않는다
+  await open(`meal?food=${EGG}`);
+  (await waitFor(() => doc().querySelector('#save-meal'))).click();
+  await waitFor(() => stored().meals.length === 2);
+  await sleep(300);
+  if (!doc().querySelector('#sheet').hidden) throw new Error('기록 뒤에 창이 다시 열림');
+  if (frame.contentWindow.location.hash !== '#meal') throw new Error(frame.contentWindow.location.hash);
 });
 
 // 오프라인 동작은 tools/run_tests.py 가 서버를 끈 뒤 다시 열어서 확인한다.

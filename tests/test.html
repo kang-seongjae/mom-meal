@@ -425,6 +425,38 @@ await test('설정 파일 검사: 형식이 틀리면 거부', () => {
   eq(threw, bads.length);
 });
 
+// ───── 화면 꾸미기: 음식 이모지, 목표 진행 막대 ─────
+const { foodEmoji, goalProgress } = await import('../js/look.js');
+await test('음식 이모지: 이름으로 먼저, 없으면 분류로', () => {
+  const cases = [
+    ['달걀_삶은것', '빵 및 과자류', '🥚'], ['달걀찜', '찜류', '🥚'], ['쌀밥', '밥류', '🍚'], ['가래떡', '빵 및 과자류', '🍡'],
+    ['흰죽', '죽 및 스프류', '🥣'], ['쌀국수', '면 및 만두류', '🍜'], ['김밥_계란', '밥류', '🥚'], ['참치김밥', '밥류', '🍙'],
+    ['바나나우유', '음료 및 차류', '🥛'], ['두유', '음료 및 차류', '🥛'], ['차돌된장찌개', '찌개 및 전골류', '🍲'],
+    ['미역국', '국 및 탕류', '🍲'], ['시금치나물', '나물·숙채류', '🥬'], ['알 수 없는 요리', '구이류', '🍖'], ['무언가', '', '🍽️'],
+  ];
+  const wrong = cases.filter(([name, category, e]) => foodEmoji({ name, category }) !== e)
+    .map(([name, category, e]) => `${name}: ${foodEmoji({ name, category })} (기대 ${e})`);
+  if (wrong.length) throw new Error(wrong.join(', '));
+  eq(foodEmoji({ name: '만든 음식', custom: 'recipe' }), '🍳');
+  eq(foodEmoji({ name: '영양음료', custom: 'label', unit: 'ml' }), '🥛', '이름에 음료가 있으면 이름 우선');
+  eq(foodEmoji({ name: '제품', custom: 'label', unit: 'ml' }), '🧃');
+  eq(foodEmoji(null), '🍽️');
+});
+await test('목표 진행: 같은 측정 시점의 첫 기록부터 목표 하한까지 온 정도', () => {
+  const ws = [
+    { date: '2026-10-01', time: '08:00', kg: 52, timing: '아침' },
+    { date: '2026-10-02', time: '20:00', kg: 50, timing: '저녁' },   // 다른 시점은 시작점에 쓰지 않음
+    { date: '2026-10-10', time: '08:00', kg: 53, timing: '아침' },
+  ];
+  const p = goalProgress(ws, 55);
+  eq(p.startKg, 52); eq(p.currentKg, 53); eq(p.gained, 1); eq(p.percent, 33);
+  eq(goalProgress(ws, null), null, '목표가 없으면 막대 없음');
+  eq(goalProgress([], 55), null);
+  eq(goalProgress([ws[0]], 55).percent, 0, '기록 하나면 0%');
+  eq(goalProgress([...ws, { date: '2026-10-12', time: '08:00', kg: 55.2, timing: '아침' }], 55).percent, 100);
+  eq(goalProgress([...ws, { date: '2026-10-12', time: '08:00', kg: 51, timing: '아침' }], 55).percent, 0, '줄면 0%에서 멈춤');
+});
+
 // 체중 그래프의 값 라벨이 잘리거나 겹치지 않는지 (실제로 그려서 글자 상자를 잰다)
 const { renderWeightChart } = await import('../js/chart.js');
 const css = document.createElement('link');
