@@ -3,7 +3,7 @@ import {
   latestWeight, remainingToGoal, round1, cheerMessage, goalText, parseGoal, parseTimings,
   recipeNutrients, isRecordable, parseCountUnit, parseLabelFood,
 } from './calc.js';
-import { load, save, newId, exportJson, importJson } from './store.js';
+import { load, save, newId, exportJson, exportSettingsJson, readBackupFile } from './store.js';
 import { loadFoods, getFood, getMeta, searchFoods, setCustomFoods, SOURCE_LABEL } from './foods.js';
 import { renderWeightChart } from './chart.js';
 
@@ -805,8 +805,11 @@ function renderSettings() {
     <section class="card">
       <h2>백업</h2>
       <p class="small muted">기록, 직접 만든 음식, 직접 입력 음식, 단위 설정은 이 폰의 브라우저에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우기 전에 내보내 두세요.</p>
-      <button class="btn btn-secondary" id="export">백업 내보내기</button>
+      <button class="btn btn-secondary" id="export">전체 백업 내보내기</button>
+      <button class="btn btn-secondary" id="export-settings">설정만 내보내기</button>
+      <p class="small muted">설정만 내보내기: 즐겨찾기, 직접 만든 음식, 직접 입력 음식, 개수 단위, 한 그릇 무게, 칼륨 기준값, 측정 시점, 목표 체중이 들어가고 식사·체중 기록은 빠져요.</p>
       <label class="btn btn-secondary file-btn">백업 불러오기<input id="import" type="file" accept="application/json,.json" hidden></label>
+      <p class="small muted">전체 백업을 불러오면 이 폰의 기록이 백업으로 바뀌어요. 설정 파일을 불러오면 기록은 그대로 두고 설정만 합쳐요(이미 있는 음식은 다시 추가하지 않아요).</p>
     </section>
 
     <section class="card source">
@@ -856,20 +859,40 @@ function renderSettings() {
     persist();
     toast('무게와 단위를 저장했어요.');
   });
-  $('#export').addEventListener('click', () => {
-    const blob = new Blob([exportJson(state)], { type: 'application/json' });
+  const download = (text, filename) => {
+    const blob = new Blob([text], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `식사기록-백업-${today()}.json`;
+    a.download = filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  });
+  };
+  $('#export').addEventListener('click', () => download(exportJson(state), `식사기록-백업-${today()}.json`));
+  $('#export-settings').addEventListener('click', () => download(exportSettingsJson(state), `식사기록-설정-${today()}.json`));
   $('#import').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     try {
-      const next = importJson(await file.text());
-      if (!confirm(`식사 ${next.meals.length}건, 체중 ${next.weights.length}건, 직접 등록한 음식 ${next.customFoods.length}개를 불러올까요?\n지금 폰에 있는 기록은 이 백업으로 바뀌어요.`)) return;
+      const r = readBackupFile(await file.text(), state);
+      if (r.kind === 'settings') {
+        const { added, skipped, favoritesAdded } = r.report;
+        const lines = [
+          '설정 파일이에요. 식사·체중 기록은 그대로 두고 설정만 합칠까요?',
+          `· 새로 추가할 음식 ${added.length}개${added.length ? `: ${added.join(', ')}` : ''}`,
+          `· 이미 있어서 건너뛸 음식 ${skipped.length}개${skipped.length ? `: ${skipped.join(', ')}` : ''}`,
+          `· 즐겨찾기 ${favoritesAdded}개 추가`,
+          '· 목표 체중, 칼륨 기준값, 측정 시점, 개수 단위, 한 그릇 무게는 파일의 값으로 바뀌어요.',
+        ];
+        if (!confirm(lines.join('\n'))) return;
+        state = r.state;
+        setCustomFoods(state.customFoods);
+        persist();
+        toast(`설정을 합쳤어요. 음식 ${added.length}개 추가, ${skipped.length}개는 이미 있어요.`);
+        renderSettings();
+        return;
+      }
+      const next = r.state;
+      if (!confirm(`전체 백업이에요. 식사 ${next.meals.length}건, 체중 ${next.weights.length}건, 직접 등록한 음식 ${next.customFoods.length}개를 불러올까요?\n지금 폰에 있는 기록은 이 백업으로 바뀌어요.`)) return;
       state = next;
       setCustomFoods(state.customFoods);
       persist();

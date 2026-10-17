@@ -249,23 +249,64 @@ export function validateBackup(obj) {
       throw new Error('식사 기록 형식이 맞지 않아요.');
     }
   }
+  validateFoodSettings(obj);
+  for (const w of obj.weights) {
+    if (typeof w.date !== 'string' || typeof w.kg !== 'number') {
+      throw new Error('체중 기록 형식이 맞지 않아요.');
+    }
+  }
+  return true;
+}
+
+const isPlainObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+// 전체 백업과 설정 파일이 함께 쓰는 검사: 직접 등록한 음식, 개수 단위, 한 그릇 무게
+function validateFoodSettings(obj) {
   if (obj.customFoods !== undefined) {
     if (!Array.isArray(obj.customFoods)) throw new Error('직접 등록한 음식 목록 형식이 맞지 않아요.');
     for (const c of obj.customFoods) {
-      if (typeof c.code !== 'string' || !c.code.startsWith('my-') || typeof c.name !== 'string'
+      if (!isPlainObject(c) || typeof c.code !== 'string' || !c.code.startsWith('my-') || typeof c.name !== 'string'
         || !['recipe', 'label'].includes(c.kind)) {
         throw new Error('직접 등록한 음식 형식이 맞지 않아요.');
       }
       if (c.kind === 'recipe' && !Array.isArray(c.items)) throw new Error(`"${c.name}"의 재료 목록이 없어요.`);
     }
   }
-  if (obj.units !== undefined && (typeof obj.units !== 'object' || obj.units === null || Array.isArray(obj.units))) {
-    throw new Error('개수 단위 형식이 맞지 않아요.');
-  }
-  for (const w of obj.weights) {
-    if (typeof w.date !== 'string' || typeof w.kg !== 'number') {
-      throw new Error('체중 기록 형식이 맞지 않아요.');
+  if (obj.units !== undefined) {
+    if (!isPlainObject(obj.units)) throw new Error('개수 단위 형식이 맞지 않아요.');
+    for (const u of Object.values(obj.units)) {
+      if (!isPlainObject(u) || typeof u.name !== 'string' || !(u.amount > 0)) throw new Error('개수 단위 형식이 맞지 않아요.');
     }
   }
+  if (obj.servings !== undefined) {
+    if (!isPlainObject(obj.servings) || Object.values(obj.servings).some((v) => !(v > 0))) {
+      throw new Error('한 그릇 무게 형식이 맞지 않아요.');
+    }
+  }
+}
+
+// 설정 파일(설정만 내보내기) 검사. 식사·체중 기록은 들어 있지 않아야 한다.
+export function validateSettingsBackup(obj) {
+  if (!isPlainObject(obj) || obj.app !== 'mom-meal' || obj.kind !== 'settings') {
+    throw new Error('이 앱의 설정 파일이 아니에요.');
+  }
+  if ('meals' in obj || 'weights' in obj) throw new Error('설정 파일에 식사·체중 기록이 들어 있어요.');
+  if (!Array.isArray(obj.favorites) || obj.favorites.some((c) => typeof c !== 'string')) {
+    throw new Error('즐겨찾기 형식이 맞지 않아요.');
+  }
+  if (!Array.isArray(obj.customFoods)) throw new Error('직접 등록한 음식 목록이 없어요.');
+  validateFoodSettings(obj);
+  const s = obj.settings;
+  if (!isPlainObject(s)) throw new Error('설정 값이 없어요.');
+  const goal = (v) => v === null || (typeof v === 'number' && v > 0);
+  if (!goal(s.goalLow) || !goal(s.goalHigh) || (s.goalLow !== null && s.goalHigh !== null && s.goalHigh < s.goalLow)) {
+    throw new Error('목표 체중 형식이 맞지 않아요.');
+  }
+  if (typeof s.kLow !== 'number' || typeof s.kHigh !== 'number' || s.kLow < 0 || s.kHigh <= s.kLow) {
+    throw new Error('칼륨 기준값 형식이 맞지 않아요.');
+  }
+  if (!Array.isArray(s.timings) || s.timings.some((t) => typeof t !== 'string')) throw new Error('측정 시점 형식이 맞지 않아요.');
+  const t = parseTimings(s.timings.join(','));
+  if (t.length !== s.timings.length) throw new Error('측정 시점 형식이 맞지 않아요.');
   return true;
 }

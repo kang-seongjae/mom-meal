@@ -255,6 +255,67 @@ await test('이전 버전에서 저장된 기록(per100)도 그대로 열리고 
   await waitFor(() => text().includes('200g · 390kcal'));
 });
 
+await test('설정만 내보내기 → 다른 폰에서 불러오기: 기록은 그대로, 설정만 합치고 두 번 불러와도 중복 없음', async () => {
+  const label = { code: 'my-e2e-label', kind: 'label', name: '라벨 음식(테스트)', basis: 200, unit: 'ml', kcal: 400, protein: 14, potassium: null };
+  const recipe = { code: 'my-e2e-recipe', kind: 'recipe', name: '만든 음식(테스트)',
+    items: [{ code: label.code, name: label.name, unit: 'ml', basis: 200, amount: 100, per: { kcal: 400, protein: 14, potassium: null } }],
+    kcal: 200, protein: 7, potassium: null, potassiumPartial: false };
+  const base = { app: 'mom-meal', version: 1, servings: {} };
+  // 폰 A: 설정을 만들어 둔 폰
+  localStorage.setItem('momMeal.v1', JSON.stringify({ ...base,
+    meals: [{ id: 'a1', date: '2026-10-01', amount: 1, basis: 1, code: recipe.code, name: recipe.name, unit: '인분', per: { kcal: 200, protein: 7, potassium: null } }],
+    weights: [{ id: 'aw', date: '2026-10-01', kg: 52, timing: '아침' }],
+    favorites: [label.code, recipe.code], customFoods: [label, recipe],
+    units: { [EGG]: { name: '개', amount: 50 } }, servings: { [RICE]: 210 },
+    settings: { goalLow: 55, goalHigh: 57, kLow: 120, kHigh: 250, timings: ['아침', '저녁', '운동 후'] } }));
+  await open('settings');
+  const w = frame.contentWindow;
+  let saved = null;
+  w.HTMLAnchorElement.prototype.click = function () { saved = { name: this.download, href: this.href }; };
+  (await waitFor(() => doc().querySelector('#export-settings'))).click();
+  await waitFor(() => saved);
+  if (!saved.name.startsWith('식사기록-설정-')) throw new Error(saved.name);
+  const fileText = await (await w.fetch(saved.href)).text();
+  const out = JSON.parse(fileText);
+  if ('meals' in out || 'weights' in out || out.customFoods.length !== 2) throw new Error('내보낸 내용이 이상함');
+
+  // 폰 B: 자기 기록이 있는 폰
+  const bMeal = { id: 'b1', date: '2026-10-02', amount: 100, basis: 100, code: RICE, name: '쌀밥', unit: 'g', per: { kcal: 166, protein: 3.36, potassium: 26 } };
+  const bWeight = { id: 'bw', date: '2026-10-02', kg: 60, timing: '저녁' };
+  localStorage.setItem('momMeal.v1', JSON.stringify({ ...base, meals: [bMeal], weights: [bWeight], favorites: [RICE],
+    customFoods: [], units: {}, settings: { goalLow: null, goalHigh: null, kLow: 100, kHigh: 200, timings: ['아침', '기타'] } }));
+  async function importFile() {
+    await open('settings');
+    const win = frame.contentWindow;
+    let asked = '';
+    win.confirm = (msg) => { asked = msg; return true; };
+    const input = await waitFor(() => doc().querySelector('#import'));
+    const dt = new win.DataTransfer();
+    dt.items.add(new win.File([fileText], 'settings.json', { type: 'application/json' }));
+    input.files = dt.files;
+    input.dispatchEvent(new win.Event('change'));
+    await waitFor(() => asked);
+    return asked;
+  }
+  const asked1 = await importFile();
+  if (!asked1.includes('설정만 합칠까요') || !asked1.includes('새로 추가할 음식 2개')) throw new Error(asked1);
+  await waitFor(() => stored().customFoods.length === 2);
+  let s = stored();
+  if (JSON.stringify(s.meals) !== JSON.stringify([bMeal]) || JSON.stringify(s.weights) !== JSON.stringify([bWeight])) throw new Error('기록이 바뀜');
+  if (s.favorites.join('|') !== [RICE, label.code, recipe.code].join('|')) throw new Error(s.favorites.join('|'));
+  if (s.units[EGG]?.amount !== 50 || s.servings[RICE] !== 210) throw new Error('단위·무게 안 합쳐짐');
+  if (s.settings.goalLow !== 55 || s.settings.kHigh !== 250 || s.settings.timings.join('|') !== '아침|저녁|운동 후') throw new Error(JSON.stringify(s.settings));
+
+  // 같은 파일을 한 번 더 불러와도 늘어나지 않는다
+  const asked2 = await importFile();
+  if (!asked2.includes('새로 추가할 음식 0개') || !asked2.includes('이미 있어서 건너뛸 음식 2개')) throw new Error(asked2);
+  await waitFor(() => doc().querySelector('#toast') && !doc().querySelector('#toast').hidden);
+  s = stored();
+  if (s.customFoods.length !== 2 || s.favorites.length !== 3 || s.meals.length !== 1) throw new Error(JSON.stringify(s));
+  await open('meal');
+  await waitFor(() => [...doc().querySelectorAll('.fav')].map((b) => b.textContent).join('|') === '쌀밥|라벨 음식(테스트)|만든 음식(테스트)');
+});
+
 // 오프라인 동작은 tools/run_tests.py 가 서버를 끈 뒤 다시 열어서 확인한다.
 
 localStorage.clear();

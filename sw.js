@@ -1,6 +1,6 @@
 // 인터넷이 없어도 열리도록 앱 파일과 음식 데이터를 모두 저장해 둔다.
 // 파일을 바꾸면 VERSION 을 올려야 폰에 새 버전이 받아진다.
-const VERSION = 'mom-meal-v5';
+const VERSION = 'mom-meal-v6';
 const FILES = [
   './',
   './index.html',

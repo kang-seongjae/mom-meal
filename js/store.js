@@ -1,5 +1,5 @@
 // 기록은 이 폰의 브라우저(localStorage)에만 저장한다.
-import { DEFAULT_SETTINGS, validateBackup, normalizeMeal } from './calc.js';
+import { DEFAULT_SETTINGS, validateBackup, validateSettingsBackup, normalizeMeal } from './calc.js';
 
 const KEY = 'momMeal.v1';
 
@@ -45,14 +45,97 @@ export function exportJson(state) {
   return JSON.stringify({ ...state, exportedAt: new Date().toISOString() }, null, 1);
 }
 
-// 형식이 맞을 때만 새 상태를 돌려준다. 틀리면 throw.
-export function importJson(text) {
-  let obj;
+// 설정만 내보내기: 식사·체중 기록은 빼고 다른 폰에서 그대로 쓸 수 있는 것만 담는다.
+export function exportSettingsJson(state) {
+  const { goalLow, goalHigh, kLow, kHigh, timings } = state.settings;
+  return JSON.stringify({
+    app: 'mom-meal',
+    kind: 'settings',
+    version: 1,
+    favorites: state.favorites,
+    customFoods: state.customFoods,
+    units: state.units,
+    servings: state.servings,
+    settings: { goalLow, goalHigh, kLow, kHigh, timings },
+    exportedAt: new Date().toISOString(),
+  }, null, 1);
+}
+
+function parseFile(text) {
   try {
-    obj = JSON.parse(text);
+    return JSON.parse(text);
   } catch {
     throw new Error('파일을 읽을 수 없어요. 백업 파일이 맞는지 확인해 주세요.');
   }
+}
+
+// 백업 파일을 읽어 종류를 알려 준다. 전체 백업이면 바꿀 상태, 설정 파일이면 합친 상태와 요약.
+export function readBackupFile(text, state) {
+  const obj = parseFile(text);
+  if (obj && obj.kind === 'settings') {
+    validateSettingsBackup(obj);
+    return { kind: 'settings', ...mergeSettings(state, obj) };
+  }
+  return { kind: 'full', state: importJson(text) };
+}
+
+const sameName = (a, b) => a.trim().replace(/\s+/g, ' ') === b.trim().replace(/\s+/g, ' ');
+
+// 설정 파일을 지금 상태에 합친다. 식사·체중 기록은 건드리지 않는다.
+// 같은 음식(코드가 같거나, 종류와 이름이 같음)은 추가하지 않고 기존 음식을 쓴다.
+export function mergeSettings(state, obj) {
+  const customFoods = [...state.customFoods];
+  const codeMap = {};   // 가져온 코드 -> 이 폰의 코드
+  const added = [];
+  const skipped = [];
+  // 라벨 음식을 먼저 합쳐야, 그 라벨을 재료로 쓴 만든 음식의 재료 코드를 바꿀 수 있다.
+  const incoming = [...obj.customFoods].sort((a, b) => (a.kind === 'label' ? 0 : 1) - (b.kind === 'label' ? 0 : 1));
+  for (const c of incoming) {
+    const dup = customFoods.find((e) => e.code === c.code || (e.kind === c.kind && sameName(e.name, c.name)));
+    if (dup) {
+      codeMap[c.code] = dup.code;
+      skipped.push(c.name);
+      continue;
+    }
+    const copy = JSON.parse(JSON.stringify(c));
+    if (copy.kind === 'recipe') copy.items = copy.items.map((it) => ({ ...it, code: codeMap[it.code] ?? it.code }));
+    customFoods.push(copy);
+    added.push(copy.name);
+  }
+  const map = (code) => codeMap[code] ?? code;
+
+  const favorites = [...state.favorites];
+  let favoritesAdded = 0;
+  for (const code of obj.favorites.map(map)) {
+    if (!favorites.includes(code)) {
+      favorites.push(code);
+      favoritesAdded += 1;
+    }
+  }
+  const units = { ...state.units };
+  for (const [code, u] of Object.entries(obj.units || {})) units[map(code)] = u;
+  const servings = { ...state.servings };
+  for (const [code, v] of Object.entries(obj.servings || {})) servings[map(code)] = v;
+
+  // 목표 체중·칼륨 기준값·측정 시점은 값이 하나뿐이라 가져온 값으로 바꾼다.
+  const { goalLow, goalHigh, kLow, kHigh, timings } = obj.settings;
+  return {
+    state: {
+      ...state,
+      favorites, customFoods, units, servings,
+      settings: { ...state.settings, goalLow, goalHigh, kLow, kHigh, timings },
+    },
+    report: {
+      added, skipped, favoritesAdded,
+      unitCount: Object.keys(obj.units || {}).length,
+      servingCount: Object.keys(obj.servings || {}).length,
+    },
+  };
+}
+
+// 형식이 맞을 때만 새 상태를 돌려준다. 틀리면 throw.
+export function importJson(text) {
+  const obj = parseFile(text);
   validateBackup(obj);
   const s = empty();
   return {
