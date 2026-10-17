@@ -7,6 +7,8 @@
 
 스크린샷의 체중·목표·식사 기록은 화면 확인용 가상의 예시 값입니다(`tests/seed.html`).
 
+항상 밝은 화면(흰 배경, 진한 글씨)으로 보입니다. 글자 대비는 모두 7:1 이상이고, 폰이 다크 모드여도 어둡게 바뀌지 않습니다(`docs/screenshots/8-home-dark-mode-phone.png`).
+
 | 홈 | 음식 찾기 | 양 고르기 (칼륨 많음) | 칼륨 정보 없음 | 체중 | 설정 |
 |---|---|---|---|---|---|
 | ![](docs/screenshots/1-home.png) | ![](docs/screenshots/2-meal-search.png) | ![](docs/screenshots/3-amount-sheet.png) | ![](docs/screenshots/4-amount-no-potassium.png) | ![](docs/screenshots/5-weight.png) | ![](docs/screenshots/6-settings.png) |

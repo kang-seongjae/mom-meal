@@ -18,7 +18,10 @@ SHOTS = {
     "5-weight": "weight",
     "6-settings": "settings",
     "7-empty-home": None,                                       # 기록이 하나도 없을 때
+    "8-home-dark-mode-phone": "home",                           # 폰이 다크 모드일 때도 밝게 보이는지
 }
+# 폰 다크 모드 + 브라우저의 '웹페이지 자동 어둡게' 기능을 켠 상태
+DARK_FLAGS = ["--force-dark-mode", "--enable-features=WebContentsForceDark"]
 
 
 def main(out_dir):
@@ -31,7 +34,8 @@ def main(out_dir):
         url = f"{base}/tests/frame.html?w={W}&h={H}&src=" + urllib.parse.quote(inner, safe="")
         png = out / (name + ".png")
         with tempfile.TemporaryDirectory() as prof:
-            run_browser([f"--window-size=600,{H + 200}", "--force-device-scale-factor=2",
+            extra = DARK_FLAGS if "dark-mode" in name else []
+            run_browser([*extra, f"--window-size=600,{H + 200}", "--force-device-scale-factor=2",
                          "--virtual-time-budget=10000", f"--screenshot={png}", url], prof)
         Image.open(png).crop((0, 0, W * 2, H * 2)).save(png)
         print(png)
