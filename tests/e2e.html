@@ -40,7 +40,7 @@ await test('식사 기록: 양(150g) 고르고 기록하면 저장되고 오늘 
   await waitFor(() => doc().querySelector('.result-box').textContent.includes('293')); // 195*1.5=292.5
   doc().querySelector('#save-meal').click();
   const m = await waitFor(() => stored().meals?.[0]);
-  if (m.amount !== 150 || m.per100.kcal !== 195 || m.per100.potassium !== 23) throw new Error(JSON.stringify(m));
+  if (m.amount !== 150 || m.per.kcal !== 195 || m.per.potassium !== 23 || m.basis !== 100) throw new Error(JSON.stringify(m));
   await open('home');
   await waitFor(() => text().includes('293') && text().includes('5.9')); // 3.92*1.5=5.88
 });
@@ -50,7 +50,7 @@ await test('칼륨 정보 없는 음식: 화면에 "칼륨 정보 없음", 저�
   await waitFor(() => doc().querySelector('.knote.k-unknown')?.textContent.includes('칼륨 정보 없음'));
   doc().querySelector('#save-meal').click();
   await waitFor(() => stored().meals?.length === 2);
-  if (stored().meals[1].per100.potassium !== null) throw new Error('null 이 아님');
+  if (stored().meals[1].per.potassium !== null) throw new Error('null 이 아님');
   await open('meal');
   await waitFor(() => [...doc().querySelectorAll('.kbadge')].some((b) => b.textContent === '칼륨 정보 없음'));
 });
@@ -110,6 +110,149 @@ await test('검색: "죽" 을 치면 결과가 나온다', async () => {
   q.value = '죽';
   q.dispatchEvent(new Event('input'));
   await waitFor(() => doc().querySelectorAll('.result').length > 5);
+});
+
+// ───── 개수 단위 · 직접 입력 음식 · 직접 만든 음식 ─────
+// 라벨 수치(400kcal 등)는 화면 동작 확인용 가상 값이다.
+const EGG = 'D327-758010000-0001';   // 달걀_삶은것 100g당 150kcal
+const RICE = 'D301-022000000-0001';  // 쌀밥 100g당 166kcal
+function setVal(sel, v) {
+  const el = doc().querySelector(sel);
+  el.value = v;
+  el.dispatchEvent(new Event('input'));
+}
+
+await test('개수 단위: 삶은 달걀 "1개 = 50g" 설정 → "2개" 골라 기록', async () => {
+  await open(`meal?food=${EGG}`);
+  await waitFor(() => doc().querySelector('#unit-name'));
+  doc().querySelector('#unit-name').value = '개';
+  doc().querySelector('#unit-amount').value = '50';
+  doc().querySelector('#apply-fine').click();
+  const two = await waitFor(() => [...doc().querySelectorAll('.amount')].find((b) => b.textContent.includes('2개') && b.textContent.includes('100g')));
+  two.click();
+  await waitFor(() => doc().querySelector('.result-box').textContent.includes('150 kcal'));
+  const before = stored().meals.length;
+  doc().querySelector('#save-meal').click();
+  const m = await waitFor(() => stored().meals.length === before + 1 && stored().meals.at(-1));
+  if (m.amount !== 100 || m.amountLabel !== '2개') throw new Error(JSON.stringify(m));
+  if (JSON.stringify(stored().units[EGG]) !== '{"name":"개","amount":50}') throw new Error('단위 저장 안 됨');
+  await open('meal');
+  await waitFor(() => text().includes('2개 (100g)'));
+});
+
+let labelCode;
+await test('직접 입력 음식: 수치를 비워 둔 채 등록 → 즐겨찾기에 추가, 기록은 막히고 안내', async () => {
+  await open('label?id=new');
+  setVal('#l-name', '영양음료(테스트)');
+  doc().querySelector('#l-save').click();
+  const c = await waitFor(() => stored().customFoods?.find((x) => x.kind === 'label'));
+  labelCode = c.code;
+  for (const k of ['basis', 'kcal', 'protein', 'potassium']) if (c[k] !== null) throw new Error(`${k} 값이 ${c[k]}`);
+  if (!stored().favorites.includes(labelCode)) throw new Error('즐겨찾기 안 됨');
+  await waitFor(() => [...doc().querySelectorAll('.tag')].some((t) => t.textContent === '수치 입력 필요'));
+  await open(`meal?food=${labelCode}`);
+  const btn = await waitFor(() => doc().querySelector('#save-meal'));
+  if (!btn.disabled) throw new Error('기록 버튼이 눌림');
+  if (!doc().querySelector('.result-box').textContent.includes('아직 입력하지 않았어요')) throw new Error('안내 없음');
+});
+
+await test('직접 입력 음식: 라벨 수치를 채우면 "1팩"으로 기록, 출처 "직접 입력(제품 라벨)"', async () => {
+  await open(`label?id=${labelCode}`);
+  setVal('#l-basis', '200');
+  doc().querySelector('[data-unit="ml"]').click();
+  setVal('#l-kcal', '400');
+  setVal('#l-protein', '14');
+  setVal('#l-unitname', '팩');
+  doc().querySelector('#l-save').click();
+  await waitFor(() => stored().customFoods.find((x) => x.code === labelCode).basis === 200);
+  await open(`meal?food=${labelCode}`);
+  await waitFor(() => doc().querySelector('.amount.on')?.textContent.includes('1팩'));
+  const box = doc().querySelector('.result-box').textContent;
+  if (!box.includes('400 kcal') || !box.includes('칼륨 정보 없음')) throw new Error(box);
+  if (!doc().querySelector('#sheet').textContent.includes('직접 입력(제품 라벨)')) throw new Error('출처 표시 없음');
+  doc().querySelector('#save-meal').click();
+  const m = await waitFor(() => stored().meals.find((x) => x.code === labelCode));
+  if (m.amount !== 200 || m.basis !== 200 || m.per.kcal !== 400 || m.per.potassium !== null || m.source !== '직접 입력(제품 라벨)') {
+    throw new Error(JSON.stringify(m));
+  }
+  await open('meal');
+  await waitFor(() => [...doc().querySelectorAll('.fav')].some((b) => b.textContent === '영양음료(테스트)'));
+});
+
+let oilCode;
+await test('직접 입력 음식: 자료에 없는 재료(칼륨 값 없음)도 등록', async () => {
+  await open('label?id=new');
+  setVal('#l-name', '참기름(테스트)');
+  setVal('#l-basis', '100');
+  doc().querySelector('[data-unit="g"]').click();
+  setVal('#l-kcal', '900');
+  setVal('#l-protein', '0');
+  doc().querySelector('#l-fav').checked = false;
+  doc().querySelector('#l-save').click();
+  const c = await waitFor(() => stored().customFoods.find((x) => x.name === '참기름(테스트)'));
+  oilCode = c.code;
+  if (c.potassium !== null || stored().favorites.includes(oilCode)) throw new Error(JSON.stringify(c));
+});
+
+await test('직접 만든 음식: 재료 3개로 1인분 저장 → 즐겨찾기 → 기록, "칼륨 일부 정보 없음"', async () => {
+  await open('recipe?id=new');
+  async function addIng(q, code, amount) {
+    const input = await waitFor(() => doc().querySelector('#ing-q'));
+    input.value = q;
+    input.dispatchEvent(new Event('input'));
+    (await waitFor(() => doc().querySelector(`[data-ing="${code}"]`))).click();
+    await waitFor(() => doc().querySelector('#ing-amount'));
+    if (amount != null) setVal('#ing-amount', String(amount));
+    doc().querySelector('#ing-add').click();
+    await waitFor(() => doc().querySelector('#ing-q'));
+  }
+  await addIng('쌀밥', RICE, 210);
+  await addIng('달걀_삶은것', EGG, null);  // 개수 단위가 있어 "1개(50g)"가 기본
+  await addIng('참기름', oilCode, 5);
+  setVal('#r-name', '계란밥(테스트)');
+  await waitFor(() => text().includes('칼륨 일부 정보 없음'));
+  doc().querySelector('#r-save').click();
+  const r = await waitFor(() => stored().customFoods.find((x) => x.kind === 'recipe'));
+  const expectKcal = 166 * 2.1 + 150 * 0.5 + 900 * 0.05;
+  if (r.name !== '계란밥(테스트)' || r.items.length !== 3 || Math.abs(r.kcal - expectKcal) > 1e-6 || !r.potassiumPartial) {
+    throw new Error(JSON.stringify(r));
+  }
+  const egg = r.items.find((it) => it.code === EGG);
+  if (egg.amount !== 50 || egg.amountLabel !== '1개') throw new Error(JSON.stringify(egg));
+  if (!stored().favorites.includes(r.code)) throw new Error('즐겨찾기 안 됨');
+
+  await open('meal');
+  (await waitFor(() => [...doc().querySelectorAll('.fav')].find((b) => b.textContent === '계란밥(테스트)'))).click();
+  await waitFor(() => doc().querySelector('.amount.on')?.textContent.includes('1인분'));
+  const box = doc().querySelector('.result-box').textContent;
+  if (!box.includes(`${Math.round(expectKcal)} kcal`) || !box.includes('칼륨 일부 정보 없음')) throw new Error(box);
+  doc().querySelector('#save-meal').click();
+  const m = await waitFor(() => stored().meals.find((x) => x.code === r.code));
+  if (m.amount !== 1 || m.basis !== 1 || !m.per.potassiumPartial) throw new Error(JSON.stringify(m));
+  await open('meal');
+  await waitFor(() => [...doc().querySelectorAll('.kbadge')].some((b) => b.textContent === '칼륨 일부 정보 없음'));
+});
+
+await test('라벨 수치를 고치면 그 재료로 만든 음식도 다시 계산', async () => {
+  await open(`label?id=${oilCode}`);
+  setVal('#l-kcal', '800');
+  doc().querySelector('#l-save').click();
+  const expectKcal = 166 * 2.1 + 150 * 0.5 + 800 * 0.05;
+  await waitFor(() => Math.abs(stored().customFoods.find((x) => x.kind === 'recipe').kcal - expectKcal) < 1e-6);
+});
+
+await test('이전 버전에서 저장된 기록(per100)도 그대로 열리고 합계가 맞다', async () => {
+  const today = new Date();
+  const d = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  localStorage.setItem('momMeal.v1', JSON.stringify({
+    app: 'mom-meal', version: 1, weights: [], favorites: [], servings: {}, settings: {},
+    meals: [{ id: 'old1', date: d, time: '08:00', code: 'D102-053000000-0001', name: '가래떡', rest: '', unit: 'g',
+      amount: 200, per100: { kcal: 195, protein: 3.92, potassium: 23 } }],
+  }));
+  await open('home');
+  await waitFor(() => text().includes('390') && text().includes('7.8'));  // 195×2, 3.92×2
+  await open('meal');
+  await waitFor(() => text().includes('200g · 390kcal'));
 });
 
 // 오프라인 동작은 tools/run_tests.py 가 서버를 끈 뒤 다시 열어서 확인한다.

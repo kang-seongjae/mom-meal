@@ -8,7 +8,9 @@ import {
   scale, servingsToAmount, mealNutrients, dayTotals, recentAverage, compareToday, potassiumLevel,
   addDays, remainingToGoal, cheerMessage, validateBackup, latestWeight, DEFAULT_SETTINGS,
   goalText, parseGoal, parseTimings,
+  normalizeMeal, recipeNutrients, potassiumStatus, isRecordable, parseCountUnit, parseLabelFood, POTASSIUM_LABEL,
 } from '../js/calc.js';
+import { exportJson, importJson } from '../js/store.js';
 import { loadFoods, getFood, searchFoods } from '../js/foods.js';
 
 const results = [];
@@ -187,6 +189,133 @@ await test('검색: 이름이 맞는 일반 음식이 먼저 나온다', () => {
   eq(hits.length > 0, true);
   eq(hits[0].name, '가래떡'); eq(hits[0].rest, '');
   eq(searchFoods('   ').length, 0);
+});
+
+// ───── 개수 단위 · 직접 만든 음식 · 직접 입력 음식 ─────
+// 아래 '라벨' 수치는 계산 확인용 가상 값이다 (앱에 들어가는 값이 아님).
+const EGG = 'D327-758010000-0001';   // 달걀_삶은것 100g당 150kcal, 단백질 12.8g, 칼륨 125mg
+const RICE = 'D301-022000000-0001';  // 쌀밥 100g당 166kcal, 단백질 3.36g, 칼륨 26mg
+const item = (code, amount, extra = {}) => {
+  const f = getFood(code);
+  return { code, name: f.name, unit: f.unit, basis: f.basis, amount,
+    per: { kcal: f.kcal, protein: f.protein, potassium: f.potassium }, ...extra };
+};
+const labelItem = (amount, basis, kcal, protein, potassium) =>
+  ({ name: '라벨 음식', unit: 'g', basis, amount, per: { kcal, protein, potassium } });
+
+await test('기준량 환산: 100g이 아닌 기준(1인분, 라벨 200ml)도 비례 계산', () => {
+  eq(scale(450, 2, 1), 900);        // 1인분 450kcal × 2인분
+  eq(scale(400, 100, 200), 200);    // 200ml당 400kcal 중 100ml
+  eq(scale(null, 100, 200), null);
+});
+await test('예전 기록(per100)은 새 형식(per+basis)으로 바뀌고 값은 같다', () => {
+  const old = { date: '2026-10-17', amount: 150, per100: { kcal: 195, protein: 3.92, potassium: 23 } };
+  const n = normalizeMeal(old);
+  eq(n.basis, 100); eq(n.per.kcal, 195); eq('per100' in n, false);
+  eq(mealNutrients(n).kcal, mealNutrients(old).kcal);
+  eq(normalizeMeal(n).basis, 100, '두 번 바꿔도 그대로');
+});
+await test('개수 단위: "1개 = 50g" 설정과 입력 검사', () => {
+  eq(JSON.stringify(parseCountUnit('개', '50')), '{"name":"개","amount":50}');
+  eq(parseCountUnit('', ''), null, '둘 다 비우면 단위 없음');
+  let threw = 0;
+  for (const [n, a] of [['개', ''], ['', '50'], ['개', '0'], ['아주긴단위이름', '5']]) { try { parseCountUnit(n, a); } catch { threw++; } }
+  eq(threw, 4);
+});
+await test('개수 단위: 삶은 달걀 2개(1개=50g) = 100g → 150kcal, 단백질 12.8g, 칼륨 125mg', () => {
+  const egg = getFood(EGG);
+  eq(egg.name, '달걀_삶은것');
+  const n = mealNutrients({ amount: 2 * 50, basis: egg.basis, per: { kcal: egg.kcal, protein: egg.protein, potassium: egg.potassium } });
+  eq(n.kcal, 150); eq(n.protein, 12.8); eq(n.potassium, 125);
+});
+await test('직접 만든 음식: 재료 수치를 더한다 (쌀밥 210g + 달걀 1개 50g)', () => {
+  const t = recipeNutrients([item(RICE, 210), item(EGG, 50)]);
+  eq(Math.abs(t.kcal - (166 * 2.1 + 75)) < 1e-9, true, 'kcal');
+  eq(Math.abs(t.protein - (3.36 * 2.1 + 6.4)) < 1e-9, true, '단백질');
+  eq(Math.abs(t.potassium - (26 * 2.1 + 62.5)) < 1e-9, true, '칼륨');
+  eq(t.potassiumPartial, false);
+});
+await test('직접 만든 음식: 칼륨 없는 재료가 있으면 "칼륨 일부 정보 없음" (0으로 더하지 않음)', () => {
+  const t = recipeNutrients([item(RICE, 210), item(EGG, 50), labelItem(5, 10, 90, 0, null)]);
+  eq(t.potassiumPartial, true); eq(t.missingCount, 1);
+  eq(Math.abs(t.potassium - (26 * 2.1 + 62.5)) < 1e-9, true, '아는 재료만 더함');
+  eq(Math.abs(t.kcal - (166 * 2.1 + 75 + 45)) < 1e-9, true, '칼로리는 모두 더함');
+  eq(potassiumStatus(t.potassium, t.potassiumPartial), 'partial');
+  eq(POTASSIUM_LABEL.partial, '칼륨 일부 정보 없음');
+});
+await test('직접 만든 음식: 모든 재료에 칼륨이 없으면 "칼륨 정보 없음"', () => {
+  const t = recipeNutrients([labelItem(5, 10, 90, 0, null), item('D202-120000000-4493', 100)]);
+  eq(t.potassium, null); eq(t.potassiumPartial, false);
+  eq(potassiumStatus(t.potassium, t.potassiumPartial), 'unknown');
+});
+await test('직접 만든 음식: 아는 재료만으로 기준 이상이면 "많음 (일부 정보 없음)"', () => {
+  eq(potassiumStatus(250, true), 'partial-high');
+  eq(potassiumStatus(150, true), 'partial');
+  eq(potassiumStatus(150, false), 'mid');
+});
+await test('직접 만든 음식: 1인분·2인분 기록과 하루 합계(칼륨 일부 없음은 따로 셈)', () => {
+  const t = recipeNutrients([item(RICE, 210), labelItem(5, 10, 90, 0, null)]);
+  const per = { kcal: t.kcal, protein: t.protein, potassium: t.potassium, potassiumPartial: t.potassiumPartial };
+  const m = { date: '2026-10-17', amount: 2, basis: 1, per };
+  const n = mealNutrients(m);
+  eq(n.kcal, t.kcal * 2); eq(n.potassiumPartial, true);
+  const d = dayTotals([m, meal('2026-10-17', 100, 100, 1, 40)], '2026-10-17');
+  eq(Math.abs(d.potassiumKnown - (t.potassium * 2 + 40)) < 1e-9, true);
+  eq(d.potassiumMissing, 1);
+});
+await test('직접 만든 음식: 칼로리 없는 재료는 넣을 수 없다', () => {
+  let threw = false;
+  try { recipeNutrients([labelItem(5, 10, null, null, null)]); } catch { threw = true; }
+  eq(threw, true);
+});
+await test('직접 입력 음식: 수치를 비워 둔 채 저장 가능, 비운 칸은 null (0 아님), 기록은 불가', () => {
+  const f = parseLabelFood({ name: '영양음료', basis: '', unit: null, kcal: '', protein: ' ', potassium: '' });
+  eq(f.name, '영양음료'); eq(f.basis, null); eq(f.kcal, null); eq(f.protein, null); eq(f.potassium, null);
+  eq(isRecordable(f), false);
+});
+await test('직접 입력 음식: 라벨 200ml당 값 → 100ml 기록은 절반, 칼륨 비우면 "정보 없음"', () => {
+  const f = parseLabelFood({ name: '영양음료', basis: '200', unit: 'ml', kcal: '400', protein: '14', potassium: '' });
+  eq(isRecordable(f), true); eq(f.potassium, null);
+  const n = mealNutrients({ amount: 100, basis: f.basis, per: { kcal: f.kcal, protein: f.protein, potassium: f.potassium } });
+  eq(n.kcal, 200); eq(n.protein, 7); eq(n.potassium, null);
+  eq(potassiumStatus(n.potassium, false), 'unknown');
+});
+await test('직접 입력 음식: 잘못된 값은 거부', () => {
+  let threw = 0;
+  for (const bad of [{ name: '' }, { name: 'a', basis: '200' }, { name: 'a', basis: '0', unit: 'g' },
+    { name: 'a', kcal: '-5' }, { name: 'a', protein: 'abc' }]) {
+    try { parseLabelFood(bad); } catch { threw++; }
+  }
+  eq(threw, 5);
+});
+await test('백업: 직접 만든 음식·직접 입력 음식·개수 단위가 내보내기/불러오기에 포함', () => {
+  const recipe = { code: 'my-r1', kind: 'recipe', name: '만든 음식', items: [item(RICE, 210)], kcal: 348.6, protein: 7.056, potassium: 54.6, potassiumPartial: false };
+  const label = { code: 'my-l1', kind: 'label', name: '라벨 음식', basis: null, unit: null, kcal: null, protein: null, potassium: null };
+  const state = { app: 'mom-meal', version: 1, meals: [], weights: [], favorites: ['my-r1'], servings: {},
+    units: { [EGG]: { name: '개', amount: 50 }, 'my-l1': { name: '팩', amount: 200 } },
+    customFoods: [recipe, label], settings: {} };
+  const back = importJson(exportJson(state));
+  eq(back.customFoods.length, 2);
+  eq(JSON.stringify(back.customFoods[0]), JSON.stringify(recipe));
+  eq(back.customFoods[1].kcal, null, '비워 둔 값은 null 그대로');
+  eq(back.units[EGG].amount, 50); eq(back.units['my-l1'].name, '팩');
+  eq(back.favorites[0], 'my-r1');
+});
+await test('백업: 예전 백업(per100, 직접 등록 음식 없음)도 불러와진다', () => {
+  const old = { app: 'mom-meal', meals: [{ date: '2026-10-17', amount: 100, per100: { kcal: 195, protein: 3.92, potassium: 23 } }], weights: [], favorites: [] };
+  const back = importJson(JSON.stringify(old));
+  eq(back.meals[0].per.kcal, 195); eq(back.meals[0].basis, 100);
+  eq(back.customFoods.length, 0); eq(JSON.stringify(back.units), '{}');
+});
+await test('백업 검사: 직접 등록 음식 형식이 틀리면 거부', () => {
+  const base = { app: 'mom-meal', meals: [], weights: [], favorites: [] };
+  let threw = 0;
+  for (const bad of [{ customFoods: 'x' }, { customFoods: [{ code: 'x1', kind: 'label', name: 'a' }] },
+    { customFoods: [{ code: 'my-1', kind: 'other', name: 'a' }] }, { customFoods: [{ code: 'my-1', kind: 'recipe', name: 'a' }] },
+    { units: [] }]) {
+    try { validateBackup({ ...base, ...bad }); } catch { threw++; }
+  }
+  eq(threw, 5);
 });
 
 // 체중 그래프의 값 라벨이 잘리거나 겹치지 않는지 (실제로 그려서 글자 상자를 잰다)

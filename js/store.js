@@ -1,5 +1,5 @@
 // 기록은 이 폰의 브라우저(localStorage)에만 저장한다.
-import { DEFAULT_SETTINGS, validateBackup } from './calc.js';
+import { DEFAULT_SETTINGS, validateBackup, normalizeMeal } from './calc.js';
 
 const KEY = 'momMeal.v1';
 
@@ -7,10 +7,13 @@ function empty() {
   return {
     app: 'mom-meal',
     version: 1,
-    meals: [],      // {id, date, time, code, name, rest, unit, amount, per100:{kcal, protein, potassium}}
-    weights: [],    // {id, date, time, kg, timing}
-    favorites: [],  // 음식 코드
-    servings: {},   // 음식 코드 -> 한 그릇(잔) g/ml
+    // {id, date, time, code, name, rest, unit, amount, amountLabel, basis, per:{kcal, protein, potassium, potassiumPartial}}
+    meals: [],
+    weights: [],     // {id, date, time, kg, timing}
+    favorites: [],   // 음식 코드
+    servings: {},    // 음식 코드 -> 한 그릇(잔) g/ml
+    units: {},       // 음식 코드 -> 개수 단위 {name: '개', amount: 50}
+    customFoods: [], // 직접 만든 음식(kind 'recipe'), 제품 라벨을 보고 직접 입력한 음식(kind 'label')
     settings: { ...DEFAULT_SETTINGS },
   };
 }
@@ -20,7 +23,11 @@ export function load() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return empty();
     const s = JSON.parse(raw);
-    return { ...empty(), ...s, settings: { ...DEFAULT_SETTINGS, ...(s.settings || {}) } };
+    return {
+      ...empty(), ...s,
+      meals: (s.meals || []).map(normalizeMeal),
+      settings: { ...DEFAULT_SETTINGS, ...(s.settings || {}) },
+    };
   } catch {
     return empty();
   }
@@ -50,10 +57,12 @@ export function importJson(text) {
   const s = empty();
   return {
     ...s,
-    meals: obj.meals,
+    meals: obj.meals.map(normalizeMeal),
     weights: obj.weights,
     favorites: obj.favorites,
     servings: obj.servings || {},
+    units: obj.units || {},
+    customFoods: obj.customFoods || [],
     settings: { ...DEFAULT_SETTINGS, ...(obj.settings || {}) },
   };
 }

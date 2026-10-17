@@ -46,10 +46,11 @@ export function addDays(dateStr, n) {
   return localDate(new Date(y, m - 1, d + n));
 }
 
-// 100g(또는 100ml) 기준 값을 실제 먹은 양으로 환산. 값이 없으면 null 그대로 둔다.
-export function scale(per100, amount) {
-  if (per100 === null || per100 === undefined) return null;
-  return (per100 * amount) / 100;
+// basis(기본 100g·100ml) 당 값을 실제 먹은 양으로 환산. 값이 없으면 null 그대로 둔다.
+// 직접 만든 음식은 basis 1(1인분당), 라벨로 입력한 음식은 라벨 기준량(예: 200ml)당 값이다.
+export function scale(per, amount, basis = 100) {
+  if (per === null || per === undefined) return null;
+  return (per * amount) / basis;
 }
 
 // "한 그릇 = N g" 설정으로 그릇 수를 그램으로 바꾼다.
@@ -57,15 +58,26 @@ export function servingsToAmount(servings, gramsPerServing) {
   return servings * gramsPerServing;
 }
 
+// 예전 기록({per100})을 지금 형식({per, basis})으로 바꾼다.
+export function normalizeMeal(m) {
+  if (m.per) return { ...m, basis: m.basis ?? 100 };
+  const { per100, ...rest } = m;
+  return { ...rest, per: per100, basis: 100 };
+}
+
+// meal: {amount, basis, per: {kcal, protein, potassium, potassiumPartial}}
 export function mealNutrients(meal) {
+  const per = meal.per ?? meal.per100;
+  const basis = meal.basis ?? 100;
   return {
-    kcal: scale(meal.per100.kcal, meal.amount),
-    protein: scale(meal.per100.protein, meal.amount),
-    potassium: scale(meal.per100.potassium, meal.amount),
+    kcal: scale(per.kcal, meal.amount, basis),
+    protein: scale(per.protein, meal.amount, basis),
+    potassium: scale(per.potassium, meal.amount, basis),
+    potassiumPartial: !!per.potassiumPartial,  // 재료 중 일부만 칼륨 값이 있음
   };
 }
 
-// 하루 합계. 칼륨은 값이 있는 음식만 더하고, 값이 없는 음식 수를 따로 센다.
+// 하루 합계. 칼륨은 값이 있는 만큼만 더하고, 값이 없거나 일부만 있는 음식 수를 따로 센다.
 export function dayTotals(meals, date) {
   const t = { count: 0, kcal: 0, protein: 0, potassiumKnown: 0, potassiumMissing: 0 };
   for (const m of meals) {
@@ -75,9 +87,82 @@ export function dayTotals(meals, date) {
     t.kcal += n.kcal ?? 0;
     t.protein += n.protein ?? 0;
     if (n.potassium === null) t.potassiumMissing += 1;
-    else t.potassiumKnown += n.potassium;
+    else {
+      t.potassiumKnown += n.potassium;
+      if (n.potassiumPartial) t.potassiumMissing += 1;
+    }
   }
   return t;
+}
+
+// 직접 만든 음식: 재료(각자 basis 당 값과 양)를 더해 1인분 값을 만든다.
+// 칼륨은 값이 있는 재료만 더하고, 하나라도 없으면 potassiumPartial. 모두 없으면 null.
+export function recipeNutrients(items) {
+  let kcal = 0, protein = 0, potassium = 0, known = 0, missing = 0;
+  for (const it of items) {
+    const n = mealNutrients(it);
+    if (n.kcal === null || n.protein === null) throw new Error(`${it.name ?? '재료'}의 칼로리·단백질 값이 없어요.`);
+    kcal += n.kcal;
+    protein += n.protein;
+    if (n.potassium === null) missing += 1;
+    else {
+      potassium += n.potassium;
+      known += 1;
+      if (n.potassiumPartial) missing += 1;
+    }
+  }
+  return {
+    kcal, protein,
+    potassium: known ? potassium : null,
+    potassiumPartial: known > 0 && missing > 0,
+    missingCount: missing,
+  };
+}
+
+// 화면에 보일 칼륨 상태. 일부 정보만 있으면 아는 값만으로 '많음'인지 따로 알려 준다.
+export function potassiumStatus(mg, partial, settings = DEFAULT_SETTINGS) {
+  if (partial) return mg !== null && mg >= settings.kHigh ? 'partial-high' : 'partial';
+  return potassiumLevel(mg, settings);
+}
+
+// 기준량·칼로리·단백질이 모두 있어야 기록할 수 있다 (라벨 음식은 수치를 비워 둔 채로 저장할 수 있어서).
+export function isRecordable(food) {
+  return food.kcal != null && food.protein != null && food.basis > 0;
+}
+
+function optionalNumber(text, label) {
+  const t = String(text ?? '').trim();
+  if (t === '') return null;
+  const v = Number(t);
+  if (!Number.isFinite(v) || v < 0) throw new Error(`${label} 값을 확인해 주세요.`);
+  return v;
+}
+
+// "1개 = 50g" 같은 개수 단위. 둘 다 비우면 null(단위 없음).
+export function parseCountUnit(name, amount) {
+  const n = String(name ?? '').trim();
+  const a = String(amount ?? '').trim();
+  if (!n && !a) return null;
+  if (!n || n.length > 5) throw new Error('단위 이름은 1~5글자로 써 주세요 (예: 개, 팩).');
+  const v = Number(a);
+  if (!(v > 0)) throw new Error(`1${n}의 양을 확인해 주세요.`);
+  return { name: n, amount: v };
+}
+
+// 제품 라벨 직접 입력. 이름만 있으면 저장되고, 수치 칸은 비워 둘 수 있다
+// (비우면 '정보 없음'이고 0으로 바꾸지 않는다. 기준량·칼로리·단백질이 채워져야 기록할 수 있다).
+export function parseLabelFood(f) {
+  const name = String(f.name ?? '').trim();
+  if (!name || name.length > 30) throw new Error('음식 이름을 30글자 이내로 써 주세요.');
+  const basis = optionalNumber(f.basis, '라벨 기준량');
+  if (basis === 0) throw new Error('라벨 기준량은 0보다 커야 해요.');
+  if (basis !== null && f.unit !== 'g' && f.unit !== 'ml') throw new Error('기준량 단위(g 또는 ml)를 골라 주세요.');
+  return {
+    name, basis, unit: f.unit === 'g' || f.unit === 'ml' ? f.unit : null,
+    kcal: optionalNumber(f.kcal, '칼로리'),
+    protein: optionalNumber(f.protein, '단백질'),
+    potassium: optionalNumber(f.potassium, '칼륨'),
+  };
 }
 
 // 오늘 이전 n일 중 기록이 있는 날만으로 평균을 낸다.
@@ -118,7 +203,10 @@ export function potassiumLevel(mg, settings = DEFAULT_SETTINGS) {
   return 'high';
 }
 
-export const POTASSIUM_LABEL = { low: '적음', mid: '보통', high: '많음', unknown: '칼륨 정보 없음' };
+export const POTASSIUM_LABEL = {
+  low: '적음', mid: '보통', high: '많음', unknown: '칼륨 정보 없음',
+  partial: '칼륨 일부 정보 없음', 'partial-high': '칼륨 많음 (일부 정보 없음)',
+};
 
 export function latestWeight(weights) {
   if (!weights.length) return null;
@@ -157,9 +245,22 @@ export function validateBackup(obj) {
     if (!Array.isArray(obj[k])) throw new Error(`백업에 ${k} 목록이 없어요.`);
   }
   for (const m of obj.meals) {
-    if (typeof m.date !== 'string' || typeof m.amount !== 'number' || !m.per100) {
+    if (typeof m.date !== 'string' || typeof m.amount !== 'number' || !(m.per || m.per100)) {
       throw new Error('식사 기록 형식이 맞지 않아요.');
     }
+  }
+  if (obj.customFoods !== undefined) {
+    if (!Array.isArray(obj.customFoods)) throw new Error('직접 등록한 음식 목록 형식이 맞지 않아요.');
+    for (const c of obj.customFoods) {
+      if (typeof c.code !== 'string' || !c.code.startsWith('my-') || typeof c.name !== 'string'
+        || !['recipe', 'label'].includes(c.kind)) {
+        throw new Error('직접 등록한 음식 형식이 맞지 않아요.');
+      }
+      if (c.kind === 'recipe' && !Array.isArray(c.items)) throw new Error(`"${c.name}"의 재료 목록이 없어요.`);
+    }
+  }
+  if (obj.units !== undefined && (typeof obj.units !== 'object' || obj.units === null || Array.isArray(obj.units))) {
+    throw new Error('개수 단위 형식이 맞지 않아요.');
   }
   for (const w of obj.weights) {
     if (typeof w.date !== 'string' || typeof w.kg !== 'number') {

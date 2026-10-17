@@ -20,6 +20,11 @@ SHOTS = {
     "7-empty-home": None,                                       # 기록이 하나도 없을 때
     "8-home-dark-mode-phone": "home",                           # 폰이 다크 모드일 때도 밝게 보이는지
     "9-home-one-weight": "home&one=1",                          # 체중 기록이 하나뿐일 때 그래프 라벨
+    "10-amount-count-unit": "meal?food=D327-758010000-0001",    # 삶은 달걀: 1개 = 50g
+    "11-amount-recipe": "meal?food=my-sample-recipe",           # 직접 만든 음식: 칼륨 일부 정보 없음
+    "12-recipe-editor": "recipe?id=my-sample-recipe",
+    "13-label-form": "label?id=new",                             # 직접 입력: 빈칸으로 시작
+    "14-amount-label-draft": "meal?food=my-sample-draft",        # 수치 입력 전에는 기록 불가
 }
 # 폰 다크 모드 + 브라우저의 '웹페이지 자동 어둡게' 기능을 켠 상태
 DARK_FLAGS = ["--force-dark-mode", "--enable-features=WebContentsForceDark"]
