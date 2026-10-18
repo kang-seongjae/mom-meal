@@ -7,8 +7,9 @@
 <script type="module">
 // 화면마다 보이는 글자의 크기와 글자-배경 대비, 누르는 요소의 크기를 잰다.
 // 디자인을 바꿀 때 이 값이 이전보다 작아지거나 약해지지 않았는지 확인하는 용도.
-const SCREENS = ['home', 'meal?q=죽', 'meal?food=D711-508000000-0001', 'meal?food=my-sample-recipe',
-  'weight', 'settings', 'recipe?id=my-sample-recipe', 'label?id=new'];
+// "경로&예시 기록 옵션" (tests/seed.html 참고)
+const SCREENS = ['start&fresh=1', 'start&legacy=1', 'today&n=2', 'today&kg=56&n=4', 'today&kg=54&drop=1',
+  'records', 'settings'];
 const frame = document.getElementById('app');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -47,7 +48,8 @@ function visible(el, win) {
 
 async function measure(hash) {
   const before = frame.contentDocument;
-  frame.src = `seed.html?go=${encodeURIComponent(hash)}`;
+  const [route, ...opts] = hash.split('&');
+  frame.src = `seed.html?go=${encodeURIComponent(route)}${opts.map((x) => `&${x}`).join('')}`;
   for (let i = 0; i < 200; i++) {
     await sleep(50);
     const d = frame.contentDocument;

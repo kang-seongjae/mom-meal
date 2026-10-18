@@ -457,6 +457,136 @@ await test('목표 진행: 같은 측정 시점의 첫 기록부터 목표 하�
   eq(goalProgress([...ws, { date: '2026-10-12', time: '08:00', kg: 51, timing: '아침' }], 55).percent, 0, '줄면 0%에서 멈춤');
 });
 
+// ───── 캐릭터 키우기 ─────
+const G = await import('../js/grow.js');
+const { petSvg } = await import('../js/pet.js');
+const W = (date, kg, timing = '아침', time = '08:00') => ({ date, time, kg, timing });
+const baseGrow = { ...G.defaultGrow(), started: true, pet: 'bunny', timing: '아침', startKg: 30, startDate: '2026-10-01' };
+
+await test('성장 단계: 0.5kg 마다 한 단계, 목표에 닿아야 마지막 단계', () => {
+  eq(G.totalLevels(30, 38), 16); eq(G.totalLevels(30, 30.2), 1); eq(G.totalLevels(52, 56), 8);
+  eq(G.levelFor(30, 30, 38), 0); eq(G.levelFor(30.4, 30, 38), 0); eq(G.levelFor(30.5, 30, 38), 1);
+  eq(G.levelFor(31.2, 30, 38), 2); eq(G.levelFor(37.9, 30, 38), 15, '목표 직전은 마지막 바로 전');
+  eq(G.levelFor(38, 30, 38), 16); eq(G.levelFor(40, 30, 38), 16); eq(G.levelFor(29, 30, 38), 0);
+  eq(G.totalLevels(30, 30.6), 2); eq(G.levelFor(30.7, 30, 30.6), 2, '0.5kg 로 나누어떨어지지 않는 목표도 도착하면 마지막');
+});
+await test('성장: 몸무게가 줄어도 작아지지 않고, 줄어든 날을 알려 준다', () => {
+  const ws = [W('2026-10-02', 30.6), W('2026-10-03', 31.1), W('2026-10-04', 30.2)];
+  const s = G.growState(baseGrow, ws, 38);
+  eq(s.level, 2, '가장 높이 올라간 단계 유지'); eq(s.dropped, true); eq(s.currentKg, 30.2);
+  eq(s.final, false); eq(s.nextKg, 31.5); eq(s.toNext, 1.3);
+});
+await test('성장: 정한 측정 시점·시작일 이후 몸무게만 쓴다', () => {
+  const ws = [W('2026-09-20', 40), W('2026-10-02', 33, '저녁'), W('2026-10-03', 30.5)];
+  const s = G.growState(baseGrow, ws, 38);
+  eq(s.level, 1, '시작 전 기록과 다른 시점 기록은 빼고 계산');
+});
+await test('성장: 목표에 도착하면 마지막 모습, 그 뒤에 줄어도 유지', () => {
+  const s = G.growState(baseGrow, [W('2026-10-02', 38.1), W('2026-10-03', 37.5)], 38);
+  eq(s.final, true); eq(s.level, 16); eq(s.form, G.FORMS.length - 1); eq(s.toNext, null); eq(s.dropped, true);
+});
+await test('성장 모습: 단계 비율에 따라 아기→새싹→목도리→꽃, 크기는 점점 커짐', () => {
+  const forms = [], scales = [];
+  for (const kg of [52, 53, 54, 55, 55.9, 56]) {
+    const s = G.growState({ ...baseGrow, startKg: 52 }, [W('2026-10-02', kg)], 56);
+    forms.push(s.form); scales.push(s.scale);
+  }
+  eq(forms.join(','), '0,1,2,3,3,4');
+  eq(scales.every((v, i) => i === 0 || v >= scales[i - 1]), true, '크기는 줄지 않음');
+  eq(scales[0], 0.62); eq(scales.at(-1), 1);
+});
+await test('성장: 기록이 없으면 시작 몸무게, 0단계', () => {
+  const s = G.growState(baseGrow, [], 38);
+  eq(s.level, 0); eq(s.currentKg, 30); eq(s.dropped, false); eq(s.toNext, null);
+});
+await test('오늘 먹은 횟수: 목표 횟수를 채우면 done', () => {
+  const notes = [{ date: '2026-10-18', name: 'a' }, { date: '2026-10-18', name: 'b' }, { date: '2026-10-17', name: 'c' }];
+  const p = G.todayProgress(notes, '2026-10-18', 2);
+  eq(p.count, 2); eq(p.done, true);
+  eq(G.todayProgress(notes, '2026-10-18', 4).done, false);
+});
+await test('자주 먹은 음식: 많이 적은 순, 같으면 최근 순, 앞뒤 공백 무시', () => {
+  const notes = [
+    { date: '2026-10-10', time: '08:00', name: '흰죽' }, { date: '2026-10-11', time: '08:00', name: ' 흰죽 ' },
+    { date: '2026-10-12', time: '08:00', name: '두유' }, { date: '2026-10-13', time: '08:00', name: '바나나' },
+  ];
+  eq(G.frequentFoods(notes).join('|'), '흰죽|바나나|두유');
+  eq(G.frequentFoods(notes, 1).join('|'), '흰죽');
+});
+await test('보상: 기록한 날마다 꽃, 목표 횟수를 다 채운 날마다 하트, 연속 기록 날 수', () => {
+  const notes = [
+    { date: '2026-10-16', name: 'a' }, { date: '2026-10-16', name: 'b' },
+    { date: '2026-10-17', name: 'a' }, { date: '2026-10-18', name: 'a' }, { date: '2026-10-18', name: 'b' },
+  ];
+  const weights = [W('2026-10-15', 30), W('2026-10-16', 30)];
+  const r = G.rewards(notes, weights, 2);
+  eq(r.flowers, 4, '15·16·17·18일'); eq(r.hearts, 2, '16·18일');
+  eq(G.recordStreak(notes, weights, '2026-10-18'), 4);
+  eq(G.recordStreak(notes, weights, '2026-10-20'), 0);
+});
+await test('칼륨 주의 단어: 정리하고, 띄어쓰기·대소문자 무시하고 찾기 (기록을 막지는 않음)', () => {
+  eq(G.parseCautionWords(' 바나나, 토마토 ,,바나나\n키위').join('|'), '바나나|토마토|키위');
+  eq(G.cautionMatches('바나나 우유', ['바나나우유']).join('|'), '바나나우유');
+  eq(G.cautionMatches('바나나우유', ['바나나', '키위']).join('|'), '바나나');
+  eq(G.cautionMatches('흰죽', ['바나나']).length, 0);
+  eq(G.cautionMatches('Kiwi 주스', ['kiwi']).length, 1);
+  let threw = false;
+  try { G.parseCautionWords('가'.repeat(21)); } catch { threw = true; }
+  eq(threw, true);
+});
+await test('음식 이름·하루 횟수 입력 검사', () => {
+  eq(G.parseFoodName('  흰  죽 '), '흰 죽');
+  let threw = 0;
+  for (const t of ['', '   ', '가'.repeat(31)]) { try { G.parseFoodName(t); } catch { threw++; } }
+  for (const v of ['0', '11', '2.5', 'abc']) { try { G.parseMealsPerDay(v); } catch { threw++; } }
+  eq(threw, 7);
+  eq(G.parseMealsPerDay('4'), 4);
+});
+await test('친구 그림: 네 친구 × 다섯 모습이 모두 그려지고, 이름표가 붙는다', () => {
+  for (const kind of Object.keys(G.PETS)) {
+    for (let f = 0; f < G.FORMS.length; f++) {
+      const svg = petSvg({ kind, form: f, scale: 0.8 });
+      if (!svg.startsWith('<svg') || !svg.includes(`aria-label="${G.PETS[kind]}, ${G.FORMS[f]} 모습"`)) throw new Error(`${kind} ${f}`);
+    }
+  }
+  eq(petSvg({ kind: 'cat', mood: 'happy' }).includes('pet-happy'), true);
+  eq(/viewBox="0 0 200 200"/.test(petSvg({ kind: 'cat', scale: 1, crop: true })), true, '다 자라면 자르지 않음');
+  eq(/viewBox="0 7[0-9] 200/.test(petSvg({ kind: 'cat', scale: 0.62, crop: true })), true, '작을 때 위쪽 빈 곳을 자름');
+});
+await test('백업: 키우기 정보(친구·음식 기록·시작 몸무게)가 전체 백업에 들어가고 그대로 불러와짐', () => {
+  const grow = { ...baseGrow, cautionWords: ['바나나'], notes: [{ id: 'n1', date: '2026-10-18', time: '08:00', name: '흰죽' }] };
+  const st = { app: 'mom-meal', version: 1, meals: [], weights: [W('2026-10-18', 30.5)], favorites: [], servings: {}, units: {},
+    customFoods: [], settings: { ...DEFAULT_SETTINGS, goalLow: 38, goalHigh: 38 }, grow };
+  const back = importJson(exportJson(st));
+  eq(JSON.stringify(back.grow), JSON.stringify(grow));
+  eq(back.weights.length, 1);
+});
+await test('백업: 키우기 전(예전) 백업도 불러와지고 키우기는 처음 상태', () => {
+  const old = { app: 'mom-meal', meals: [], weights: [W('2026-10-01', 30)], favorites: [] };
+  const back = importJson(JSON.stringify(old));
+  eq(back.grow.started, false); eq(back.grow.notes.length, 0); eq(back.weights[0].kg, 30);
+});
+await test('백업: 키우기 정보 형식이 틀리면 거부', () => {
+  const base = { app: 'mom-meal', meals: [], weights: [], favorites: [] };
+  let threw = 0;
+  for (const bad of [{ grow: [] }, { grow: { pet: 'dragon' } }, { grow: { mealsPerDay: 0 } }, { grow: { startKg: -1 } },
+    { grow: { notes: [{ date: 1 }] } }, { grow: { cautionWords: 'x' } }]) {
+    try { importJson(JSON.stringify({ ...base, ...bad })); } catch { threw++; }
+  }
+  eq(threw, 6);
+});
+await test('설정만 내보내기: 하루 횟수·친구·주의 음식은 담고, 시작 몸무게·음식 기록은 빼고, 불러오면 주의 음식을 합침', () => {
+  const a = { ...phoneA(), grow: { ...baseGrow, mealsPerDay: 5, pet: 'cat', cautionWords: ['바나나', '키위'], notes: [{ date: '2026-10-18', name: '흰죽' }] } };
+  const out = JSON.parse(exportSettingsJson(a));
+  eq(JSON.stringify(out.growSettings), JSON.stringify({ mealsPerDay: 5, pet: 'cat', cautionWords: ['바나나', '키위'] }));
+  eq(JSON.stringify(out).includes('흰죽'), false); eq('startKg' in out.growSettings, false);
+  const b = { ...phoneB(), grow: { ...G.defaultGrow(), started: true, pet: 'bear', mealsPerDay: 4, cautionWords: ['키위 ', '토마토'], notes: [{ date: '2026-10-18', name: '두유' }] } };
+  const r = readBackupFile(JSON.stringify(out), b);
+  eq(r.state.grow.mealsPerDay, 5); eq(r.state.grow.pet, 'bear', '이미 고른 친구는 그대로');
+  eq(r.state.grow.cautionWords.join('|'), '키위 |토마토|바나나', '없던 것만 더함');
+  eq(r.state.grow.notes.length, 1, '음식 기록은 그대로');
+});
+
 // 체중 그래프의 값 라벨이 잘리거나 겹치지 않는지 (실제로 그려서 글자 상자를 잰다)
 const { renderWeightChart } = await import('../js/chart.js');
 const css = document.createElement('link');

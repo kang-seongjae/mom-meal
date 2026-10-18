@@ -2,7 +2,7 @@
   "name": "엄마 식사 기록",
   "short_name": "식사 기록",
   "lang": "ko",
-  "start_url": "./index.html#home",
+  "start_url": "./index.html#today",
   "scope": "./",
   "display": "standalone",
   "background_color": "#fff8ec",

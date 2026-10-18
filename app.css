@@ -338,3 +338,68 @@ input.short {
 .ing-mini { margin: 6px 0; padding-left: 1.2em; }
 .serv-list label { margin: 4px 0; }
 .serv-list small { font-size: 0.95rem; }
+
+/* ───── 캐릭터 키우기 ───── */
+body.onboarding .tabbar { display: none; }
+.lead { font-size: 1.15rem; color: var(--ink-2); }
+.start-dots { display: flex; gap: 10px; justify-content: center; margin: 4px 0 8px; }
+.start-dots .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--surface); border: 2px solid var(--control); }
+.start-dots .dot.on { background: var(--accent); border-color: var(--accent); }
+
+.rewards { margin: 0; font-size: 1.15rem; font-weight: 700; }
+
+.pet-card { text-align: center; padding: 16px 16px 14px; }
+.bubble {
+  position: relative; display: inline-block; max-width: 100%; margin: 0 0 4px;
+  background: var(--surface); border: 2px solid var(--peach-line); border-radius: 24px;
+  padding: 12px 18px; font-size: 1.2rem; font-weight: 700; line-height: 1.45;
+}
+.bubble::after {
+  content: ''; position: absolute; left: 50%; bottom: -12px; transform: translateX(-50%);
+  border: 10px solid transparent; border-top-color: var(--peach-line); border-bottom: 0;
+}
+.pet-stage { display: flex; justify-content: center; }
+.pet-stage svg { max-width: 100%; height: auto; }
+.pet-name { font-size: 1.3rem; font-weight: 800; margin: 0; }
+.pet-level { font-size: 1.1rem; color: var(--ink-2); margin: 2px 0 6px; }
+.pet-happy .pet-body { animation: hop 1.2s ease-in-out infinite; transform-origin: 100px 190px; }
+@keyframes hop {
+  0%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-8px); }
+  55% { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pet-happy .pet-body { animation: none; }
+}
+
+.slots { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 4px 0 14px; }
+.slot {
+  width: 48px; height: 48px; border-radius: 50%; border: 3px dashed var(--butter-line); background: var(--surface);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 1.4rem; font-weight: 800; color: #ffffff;
+}
+.slot.on { background: var(--accent); border: 3px solid var(--accent); }
+.slots.big { justify-content: center; margin-top: 16px; }
+.slot-extra { font-size: 1.2rem; font-weight: 800; color: var(--accent-text); }
+
+.note-form { display: flex; flex-direction: column; gap: 4px; }
+.note-form .text-input { min-height: 64px; font-size: 1.25rem; border-radius: 999px; padding: 12px 20px; }
+.note-form .btn-primary { margin: 6px 0 10px; }
+.quick { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 12px; }
+.quick-btn { background: var(--surface); }
+textarea.text-input { min-height: 104px; border-radius: 20px; resize: vertical; }
+.day-count { font-weight: 800; font-size: 1.15rem; color: var(--accent-text); white-space: nowrap; }
+
+.pet-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0 12px; }
+.pet-option {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px 12px;
+  border-radius: 26px; border: 2px solid var(--control); background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 1.25rem; font-weight: 800; cursor: pointer; box-shadow: var(--shadow-press);
+}
+.pet-option svg { max-width: 100%; height: auto; }
+.pet-option.on { border-color: var(--accent); background: var(--peach); box-shadow: inset 0 0 0 3px var(--accent); }
+.pet-pick.small .pet-option { font-size: 1.1rem; }
+
+.celebrate svg { width: 150px; height: 150px; }
+.celebrate-title { font-size: 1.5rem; font-weight: 800; }
+.celebrate-sub { font-size: 1.15rem; font-weight: 600; color: var(--ink-2); }

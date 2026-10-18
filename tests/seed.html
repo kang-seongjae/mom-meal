@@ -4,62 +4,56 @@
 <body>
 <p>스크린샷용 예시 기록을 넣는 중… (테스트 전용, 실제 앱에서는 쓰지 않음)</p>
 <script type="module">
-// 사용법: tests/seed.html?go=meal%3Fq%3D죽  → 예시 기록을 넣고 ../index.html#meal?q=죽 으로 이동
-// &one=1 이면 체중 기록을 하나만 넣는다 (그래프 라벨 확인용)
-// 영양 수치는 앱에 넣은 식약처 데이터에서 그대로 가져온다.
-import { localDate, addDays, recipeNutrients } from '../js/calc.js';
-import { loadFoods, getFood } from '../js/foods.js';
+// 사용법: tests/seed.html?go=today&kg=54&n=2  → 예시 기록을 넣고 ../index.html#today 로 이동
+//   pet=bunny|chick|bear|cat  친구 (기본 bunny)
+//   kg=54                     오늘 아침 몸무게 (처음 52kg, 목표 56kg → 0.5kg 마다 한 단계, 모두 8단계)
+//   drop=1                    전날보다 몸무게가 줄어든 날 (응원)
+//   n=4                       오늘 적은 음식 수 (하루 4번이면 다 채움)
+//   fresh=1                   아무 기록도 없는 처음 상태
+//   legacy=1                  키우기를 시작하기 전(예전 화면)의 기록만 있는 상태
+// 몸무게·음식은 화면 확인용 가상의 예시 값이다 (실제 사람의 기록이 아님).
+import { localDate, addDays } from '../js/calc.js';
 
-await loadFoods('../data/foods.json');
+const p = new URLSearchParams(location.search);
 const today = localDate();
-const meals = [];
-const add = (daysAgo, code, amount, time = '12:00') => {
-  const f = getFood(code);
-  meals.push({
-    id: `${code}-${daysAgo}-${meals.length}`, date: addDays(today, -daysAgo), time, code: f.code, name: f.name,
-    rest: f.rest, unit: f.unit, amount, basis: 100, per: { kcal: f.kcal, protein: f.protein, potassium: f.potassium },
-  });
-};
-const RICE = 'D601-022000000-0001', PORRIDGE = 'D704-212000000-0001', EGG = 'D407-317000000-0001';
-const SOUP = 'D505-223000000-0001', POTATO = 'D711-508000000-0001', PIZZA = 'D202-120000000-4493';
-for (let d = 1; d <= 7; d++) { add(d, PORRIDGE, 250, '08:00'); add(d, EGG, 100); add(d, RICE, 150, '18:00'); }
-add(0, PORRIDGE, 300, '08:00'); add(0, EGG, 110); add(0, POTATO, 50); add(0, PIZZA, 120, '15:00'); add(0, RICE, 200, '18:00');
+const go = p.get('go') || 'today';
+const KEY = 'momMeal.v1';
 
-// 화면 확인용 가상의 예시 값 (실제 사람의 기록이 아님)
-const kg = [52.0, 52.1, 51.9, 52.3, 52.4, 52.3, 52.6, 52.8, 52.7, 53.0];
-const weights = kg.map((v, i) => ({ id: `w${i}`, date: addDays(today, -(kg.length - 1 - i) * 2), time: '08:00', kg: v, timing: '아침' }));
-weights.push({ id: 'we', date: addDays(today, -1), time: '20:00', kg: 53.6, timing: '저녁' });
-const params = new URLSearchParams(location.search);
+if (p.get('fresh')) {
+  localStorage.removeItem(KEY);
+} else {
+  const kg = Number(p.get('kg') || 53.2);
+  const weights = [];
+  // 열흘 전 52kg 에서 시작해 kg 까지 조금씩 늘어난 아침 몸무게
+  for (let i = 0; i < 10; i++) {
+    const v = Math.round((52 + ((kg - 52) * i) / 9) * 10) / 10;
+    weights.push({ id: `w${i}`, date: addDays(today, -(9 - i)), time: '08:00', kg: v, timing: '아침' });
+  }
+  if (p.get('drop')) weights.push({ id: 'wd', date: today, time: '09:00', kg: Math.round((kg - 0.4) * 10) / 10, timing: '아침' });
+  weights.push({ id: 'we', date: addDays(today, -1), time: '20:00', kg: kg + 0.8, timing: '저녁' });
 
-// 개수 단위, 직접 입력 음식, 직접 만든 음식 예시. 라벨 수치는 화면 확인용 가상 값이다.
-const BOILED_EGG = 'D327-758010000-0001', PLAIN_RICE = 'D301-022000000-0001';
-const units = { [BOILED_EGG]: { name: '개', amount: 50 }, 'my-sample-label': { name: '팩', amount: 200 } };
-const sampleLabel = { code: 'my-sample-label', kind: 'label', name: '예시 음료 (라벨 입력)', basis: 200, unit: 'ml',
-  kcal: 200, protein: 8, potassium: null };
-const sampleSauce = { code: 'my-sample-sauce', kind: 'label', name: '예시 양념 (라벨 입력)', basis: 100, unit: 'g',
-  kcal: 100, protein: 5, potassium: null };
-const draftLabel = { code: 'my-sample-draft', kind: 'label', name: '예시 제품 (수치 입력 전)', basis: null, unit: null,
-  kcal: null, protein: null, potassium: null };
-const ing = (code, amount, amountLabel = null) => {
-  const f = getFood(code);
-  return { code, name: f.name, unit: f.unit, basis: 100, amount, amountLabel, per: { kcal: f.kcal, protein: f.protein, potassium: f.potassium }, source: f.source };
-};
-const items = [ing(PLAIN_RICE, 210), ing(BOILED_EGG, 50, '1개'),
-  { code: sampleSauce.code, name: sampleSauce.name, unit: 'g', basis: 100, amount: 10, amountLabel: null,
-    per: { kcal: 100, protein: 5, potassium: null }, source: '직접 입력(제품 라벨)' }];
-const t = recipeNutrients(items);
-const sampleRecipe = { code: 'my-sample-recipe', kind: 'recipe', name: '예시 계란밥', items,
-  kcal: t.kcal, protein: t.protein, potassium: t.potassium, potassiumPartial: t.potassiumPartial };
-if (params.get('one')) weights.splice(0, weights.length, { id: 'w1', date: today, time: '08:00', kg: 30.9, timing: '아침' });
+  const foods = ['흰죽', '삶은 달걀', '바나나우유', '쌀밥', '두유', '카스텔라'];
+  const notes = [];
+  for (let d = 1; d <= 6; d++) {
+    const count = d % 3 === 0 ? 3 : 4;
+    for (let i = 0; i < count; i++) notes.push({ id: `n${d}-${i}`, date: addDays(today, -d), time: `${8 + i * 4}:00`, name: foods[(d + i) % foods.length] });
+  }
+  const n = Number(p.get('n') ?? 2);
+  for (let i = 0; i < n; i++) notes.push({ id: `t${i}`, date: today, time: `${8 + i * 3}:00`, name: foods[i % foods.length] });
 
-localStorage.setItem('momMeal.v1', JSON.stringify({
-  app: 'mom-meal', version: 1, meals, weights,
-  favorites: [PORRIDGE, EGG, RICE, SOUP, 'my-sample-recipe', 'my-sample-label'],
-  servings: { [PORRIDGE]: 250, [RICE]: 210, [SOUP]: 250 },
-  units, customFoods: [sampleRecipe, sampleLabel, sampleSauce, draftLabel],
-  settings: { goalLow: 55, goalHigh: 57, kLow: 100, kHigh: 200, timings: ['아침', '저녁', '기타'] },
-}));
-const go = params.get('go') || 'home';
+  const legacy = !!p.get('legacy');
+  localStorage.setItem(KEY, JSON.stringify({
+    app: 'mom-meal', version: 1,
+    meals: legacy ? [{ id: 'm1', date: today, time: '08:00', code: 'D704-212000000-0001', name: '흰죽', rest: '', unit: 'ml',
+      amount: 250, basis: 100, per: { kcal: 64, protein: 1.2, potassium: 16 } }] : [],
+    weights, favorites: [], servings: {}, units: {}, customFoods: [],
+    settings: { goalLow: 56, goalHigh: 56, kLow: 100, kHigh: 200, timings: ['아침', '저녁', '기타'] },
+    grow: legacy ? undefined : {
+      started: true, pet: p.get('pet') || 'bunny', mealsPerDay: 4, timing: '아침',
+      startKg: 52, startDate: addDays(today, -9), cautionWords: ['바나나'], notes,
+    },
+  }));
+}
 location.replace(`../index.html#${go}`);
 </script>
 </body>

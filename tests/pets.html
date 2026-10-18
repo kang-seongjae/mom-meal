@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>친구 성장 모습 모아 보기</title>
+<link rel="stylesheet" href="../app.css">
+<style>
+  body { padding: 12px; }
+  .row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 10px; }
+  .cell { text-align: center; font-size: 15px; background: var(--card); border-radius: 14px; padding: 4px 0; }
+  .cell svg { width: 100%; height: auto; display: block; }
+  h2 { margin: 6px 0; font-size: 18px; }
+</style>
+</head>
+<body>
+<!-- 테스트·스크린샷 전용: 네 친구의 다섯 가지 모습과 기분을 한 화면에 모아 본다 -->
+<div id="out"></div>
+<script type="module">
+import { petSvg } from '../js/pet.js';
+import { PETS, FORMS } from '../js/grow.js';
+const out = document.getElementById('out');
+const mood = new URLSearchParams(location.search).get('mood') || 'normal';
+for (const kind of Object.keys(PETS)) {
+  out.insertAdjacentHTML('beforeend', `<h2>${PETS[kind]}</h2><div class="row">${FORMS.map((f, i) =>
+    `<div class="cell">${petSvg({ kind, form: i, scale: i === 4 ? 1 : 0.62 + 0.38 * i / 4, mood, size: 120 })}${f}</div>`).join('')}</div>`);
+}
+</script>
+</body>
+</html>

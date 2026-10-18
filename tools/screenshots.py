@@ -11,21 +11,26 @@ from PIL import Image
 W, H = 390, 844  # 일반적인 폰 화면 (CSS px)
 
 SHOTS = {
-    "1-home": "home",
-    "2-meal-search": "meal?q=죽",
-    "3-amount-sheet": "meal?food=D711-508000000-0001",          # 감자조림: 칼륨 많음
-    "4-amount-no-potassium": "meal?food=D202-120000000-4493",   # 칼륨 정보 없음
-    "5-weight": "weight",
-    "6-settings": "settings",
-    "7-empty-home": None,                                       # 기록이 하나도 없을 때
-    "8-home-dark-mode-phone": "home",                           # 폰이 다크 모드일 때도 밝게 보이는지
-    "9-home-one-weight": "home&one=1",                          # 체중 기록이 하나뿐일 때 그래프 라벨
-    "10-amount-count-unit": "meal?food=D327-758010000-0001",    # 삶은 달걀: 1개 = 50g
-    "11-amount-recipe": "meal?food=my-sample-recipe",           # 직접 만든 음식: 칼륨 일부 정보 없음
-    "12-recipe-editor": "recipe?id=my-sample-recipe",
-    "13-label-form": "label?id=new",                             # 직접 입력: 빈칸으로 시작
-    "14-amount-label-draft": "meal?food=my-sample-draft",        # 수치 입력 전에는 기록 불가
-    "15-celebrate": "meal?food=D327-758010000-0001&@click=%23save-meal&hold=1",  # 기록하면 뜨는 축하 문구
+    # 처음 시작 (아무 기록 없음 / 예전 화면에서 쓰던 기록이 있음)
+    "01-start-meals": "start&fresh=1",
+    "02-start-pet": "start&fresh=1&@click=%23s-next%7C%5Bdata-pet%3Dbear%5D",
+    "03-start-weight": "start&legacy=1&@click=%23s-next%7C%5Bdata-pet%3Dbear%5D%7C%23s-next",
+    # 성장 단계 (처음 52kg, 목표 56kg: 0.5kg 마다 한 단계, 모두 8단계)
+    "04-stage0-baby": "today&kg=52.3&n=1",
+    "05-stage1-sprout": "today&kg=53.1&n=2",
+    "06-stage2-scarf": "today&kg=54.1&n=2",
+    "07-stage3-flower": "today&kg=55.2&n=3",
+    "08-stage4-final": "today&kg=56&n=2",
+    # 오늘 다 먹은 날, 몸무게가 줄어든 날, 칼륨 주의 음식을 적은 때, 다 채우는 순간
+    "09-meals-done-happy": "today&kg=54.1&n=4",
+    "10-weight-drop-cheer": "today&kg=54.1&drop=1&n=2",
+    "11-caution-note": "today&kg=53.1&n=1&@click=%5Bdata-quick%3D%22%EB%B0%94%EB%82%98%EB%82%98%EC%9A%B0%EC%9C%A0%22%5D",
+    "12-celebrate-done": "today&kg=53.1&n=3&@click=%5Bdata-quick%5D&hold=1",
+    "13-records": "records&kg=54.1",
+    "14-settings": "settings&kg=54.1",
+    "15-today-dark-mode-phone": "today&kg=54.1",
+    # 네 친구의 다섯 가지 모습 모아 보기
+    "16-pets-gallery": "/tests/pets.html",
 }
 # 폰 다크 모드 + 브라우저의 '웹페이지 자동 어둡게' 기능을 켠 상태
 DARK_FLAGS = ["--force-dark-mode", "--enable-features=WebContentsForceDark"]
@@ -37,7 +42,9 @@ def main(out_dir):
     srv, base = start_server()
     for name, go in SHOTS.items():
         frame_q = ""
-        if go:
+        if go and go.startswith("/"):
+            inner = base + go
+        elif go:
             route, _, rest = go.partition("&")
             # "@"로 시작하는 값은 틀(frame.html)에 넘기고, 나머지는 예시 기록 페이지(seed.html)에 넘긴다
             extra = [x for x in rest.split("&") if x and not x.startswith("@")]

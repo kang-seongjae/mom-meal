@@ -1,20 +1,20 @@
 import {
-  localDate, mealNutrients, compareToday, potassiumStatus, POTASSIUM_LABEL,
-  latestWeight, remainingToGoal, round1, cheerMessage, goalText, parseGoal, parseTimings,
-  recipeNutrients, isRecordable, parseCountUnit, parseLabelFood,
+  localDate, addDays, latestWeight, round1, goalText, parseGoal, parseTimings,
 } from './calc.js';
 import { load, save, newId, exportJson, exportSettingsJson, readBackupFile } from './store.js';
-import { loadFoods, getFood, getMeta, searchFoods, setCustomFoods, SOURCE_LABEL } from './foods.js';
 import { renderWeightChart } from './chart.js';
-import { foodEmoji, goalProgress } from './look.js';
+import {
+  PETS, FORMS, growState, todayProgress, frequentFoods, rewards, recordStreak,
+  parseCautionWords, cautionMatches, parseFoodName, parseMealsPerDay,
+} from './grow.js';
+import { petSvg } from './pet.js';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 let state = load();
-setCustomFoods(state.customFoods);
-let foodsReady = false;
 let chartTiming = null;
-let lastQuery = '';
+let weightEditing = false;
+let cautionNote = '';     // 방금 적은 음식이 칼륨 주의 음식이면 보여 줄 안내
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $('#view');
@@ -22,11 +22,10 @@ const view = $('#view');
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-const kcalText = (v) => Math.round(v).toLocaleString('ko-KR');
-const gText = (v) => round1(v).toLocaleString('ko-KR');
-const orBlank = (v, f) => (v == null ? '입력 안 함' : f(v));
 const today = () => localDate();
 const nowTime = () => new Date().toTimeString().slice(0, 5);
+const emoji = (e) => `<span class="emo" aria-hidden="true">${e}</span>`;
+const g = () => state.grow;
 
 function persist() {
   save(state);
@@ -40,872 +39,473 @@ function toast(msg) {
   toast.timer = setTimeout(() => { t.hidden = true; }, 2600);
 }
 
-// 꾸밈용 이모지. 화면 읽기 프로그램은 읽지 않는다.
-const emoji = (e) => `<span class="emo" aria-hidden="true">${e}</span>`;
-const foodIcon = (f) => emoji(foodEmoji(f));
-
-// 음식을 기록하면 잠깐 뜨는 축하 문구. 기록할 때마다 돌아가며 보여 준다.
-const CHEERS = [
-  ['🎉', '잘 드셨어요!'],
-  ['😋', '맛있게 드셨네요!'],
-  ['🌷', '한 입 한 입 정말 잘하셨어요!'],
-  ['💛', '오늘도 힘내셨어요!'],
-];
-function celebrate() {
-  const [e, msg] = CHEERS[state.meals.length % CHEERS.length];
+// 친구와 함께 잠깐 뜨는 축하 화면
+function celebrate(title, sub = '', form = null) {
+  const gs = growNow();
   const c = $('#celebrate');
-  c.innerHTML = `<span class="celebrate-emoji" aria-hidden="true">${e}</span><span>${msg}</span>`;
+  c.innerHTML = `${petSvg({ kind: g().pet, form: form ?? gs.form, scale: 1, mood: 'happy', size: 150 })}
+    <span class="celebrate-title">${esc(title)}</span>${sub ? `<span class="celebrate-sub">${esc(sub)}</span>` : ''}`;
   c.hidden = false;
   c.classList.remove('pop');
-  void c.offsetWidth; // 다시 기록해도 움직임이 처음부터 나오도록
+  void c.offsetWidth; // 다시 떠도 움직임이 처음부터 나오도록
   c.classList.add('pop');
   clearTimeout(celebrate.timer);
-  celebrate.timer = setTimeout(() => { c.hidden = true; }, 1800);
+  celebrate.timer = setTimeout(() => { c.hidden = true; }, 2600);
 }
 
-// 자료에는 반찬도 100ml 기준인 것이 있어서, 단위가 아니라 음료인지로 정한다.
-function servingWord(food) {
-  return food.category === '음료 및 차류' ? '잔' : '그릇';
+function goalKg() {
+  return state.settings.goalLow;
 }
 
-// "100g", "200ml", "1인분" — 영양 수치가 무엇 기준인지
-function basisText(food) {
-  if (food.custom === 'recipe') return '1인분';
-  if (!(food.basis > 0)) return '기준량 미입력';
-  return `${gText(food.basis)}${food.unit}`;
+function growNow() {
+  return growState(g(), state.weights, goalKg());
 }
 
-// 기록한 양 표시: "2개 (100g)", "1인분", "150g"
-function amountText(unit, amount, label) {
-  const base = unit === '인분' ? `${gText(amount)}인분` : `${gText(amount)}${unit}`;
-  return label ? `${label} (${base})` : base;
+function dateLabel(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return `${m}월 ${d}일 ${WEEKDAYS[new Date(y, m - 1, d).getDay()]}요일`;
 }
 
-function potassiumBadge(mg, partial) {
-  const st = potassiumStatus(mg, partial, state.settings);
-  const cls = st === 'partial-high' ? 'k-high' : st === 'partial' ? 'k-unknown' : `k-${st}`;
-  const text = ['low', 'mid', 'high'].includes(st) ? `칼륨 ${POTASSIUM_LABEL[st]}` : POTASSIUM_LABEL[st];
-  return `<span class="kbadge ${cls}">${text}</span>`;
+function stepper(id, value, step, unit, label) {
+  return `<div class="stepper">
+    <button class="step" data-step="${id}" data-d="${-step}" aria-label="${label} ${step} 빼기">−</button>
+    <label class="kg-input"><input id="${id}" type="number" inputmode="decimal" step="${step}" value="${value ?? ''}" placeholder="0" aria-label="${label}"><span>${unit}</span></label>
+    <button class="step" data-step="${id}" data-d="${step}" aria-label="${label} ${step} 더하기">+</button>
+  </div>`;
 }
 
-// 양 고르기 창의 칼륨 안내. 기록은 막지 않는다.
-function potassiumNote(n, food) {
-  const st = potassiumStatus(n.potassium, n.potassiumPartial, state.settings);
-  const mg = n.potassium == null ? '' : kcalText(n.potassium);
-  if (st === 'unknown') {
-    const why = food.custom === 'label' ? '라벨의 칼륨 값을 넣지 않았어요'
-      : food.custom === 'recipe' ? '재료에 칼륨 값이 없어요' : '이 음식은 자료에 칼륨 값이 없어요';
-    return `<p class="knote k-unknown">칼륨 정보 없음 (${why})</p>`;
+function bindSteppers(root = view) {
+  root.querySelectorAll('[data-step]').forEach((b) => b.addEventListener('click', () => {
+    const input = $(`#${b.dataset.step}`, root);
+    if (input.value === '') return input.focus(); // 처음에는 숫자를 직접 입력
+    const d = Number(b.dataset.d);
+    const v = Number(input.value) + d;
+    input.value = Number.isInteger(d) ? String(Math.round(v)) : round1(v).toFixed(1);
+  }));
+}
+
+// ───────── 처음 시작: 하루 횟수 → 친구 고르기 → 몸무게와 목표 ─────────
+let startStep = 1;
+let startDraft = null;
+
+function renderStart() {
+  document.body.classList.add('onboarding');
+  if (!startDraft) {
+    const last = latestWeight(state.weights);
+    startDraft = {
+      mealsPerDay: g().mealsPerDay || 4,
+      pet: g().pet,
+      kg: last ? last.kg : '',
+      timing: last && state.settings.timings.includes(last.timing) ? last.timing : state.settings.timings[0],
+      goal: state.settings.goalLow ?? '',
+    };
   }
-  if (st === 'partial') {
-    return `<p class="knote k-unknown">칼륨 일부 정보 없음<br>칼륨 값이 없는 재료가 있어요. 값이 있는 재료만 더하면 약 ${mg}mg이에요.</p>`;
-  }
-  if (st === 'partial-high') {
-    return `<p class="knote k-high">칼륨이 많은 편이에요 (값이 있는 재료만 약 ${mg}mg, 일부 정보 없음).<br>기록은 그대로 하실 수 있어요.</p>`;
-  }
-  if (st === 'high') {
-    return `<p class="knote k-high">이 양에는 칼륨이 많은 편이에요 (약 ${mg}mg).<br>기록은 그대로 하실 수 있어요.</p>`;
-  }
-  return `<p class="knote k-${st}">칼륨 ${POTASSIUM_LABEL[st]} (약 ${mg}mg)</p>`;
-}
-
-function foodPer(food) {
-  return { kcal: food.kcal, protein: food.protein, potassium: food.potassium, potassiumPartial: food.potassiumPartial };
-}
-
-// 직접 등록한 음식 저장 (있으면 바꾸고 없으면 추가)
-function upsertCustom(obj) {
-  const i = state.customFoods.findIndex((c) => c.code === obj.code);
-  if (i >= 0) state.customFoods[i] = obj;
-  else state.customFoods.push(obj);
-  setCustomFoods(state.customFoods);
-}
-
-function removeCustom(code) {
-  state.customFoods = state.customFoods.filter((c) => c.code !== code);
-  state.favorites = state.favorites.filter((c) => c !== code);
-  delete state.units[code];
-  delete state.servings[code];
-  setCustomFoods(state.customFoods);
-}
-
-function setFavorite(code, on) {
-  const has = state.favorites.includes(code);
-  if (on && !has) state.favorites.push(code);
-  if (!on && has) state.favorites = state.favorites.filter((c) => c !== code);
-}
-
-// ───────── 홈 ─────────
-function renderHome() {
-  const d = new Date();
-  const cmp = compareToday(state.meals, today());
-  const w = latestWeight(state.weights);
-  const goal = goalText(state.settings);
-  const remain = w ? remainingToGoal(w.kg, state.settings.goalLow) : null;
-
-  let weightHtml;
-  if (!w) {
-    weightHtml = `<p class="big-label">${emoji('⚖️')} 아직 체중 기록이 없어요</p>
-      <p class="muted">한 번 재 보시면 여기에 크게 보여 드릴게요.</p>
-      <a class="btn btn-secondary" href="#weight">체중 기록하러 가기</a>`;
+  const d = startDraft;
+  const dots = [1, 2, 3].map((i) => `<span class="dot ${i === startStep ? 'on' : ''}" aria-hidden="true"></span>`).join('');
+  let body;
+  if (startStep === 1) {
+    body = `
+      <h1>${emoji('🍚')} 하루에 몇 번 드실까요?</h1>
+      <p class="lead">작은 간식도 한 번으로 세요. 적을 때마다 칸이 하나씩 채워져요.</p>
+      <section class="card card-butter">
+        ${stepper('s-meals', d.mealsPerDay, 1, '번', '하루 횟수')}
+        <div class="slots big" aria-hidden="true">${Array.from({ length: Math.min(10, Number(d.mealsPerDay) || 0) }, () => '<span class="slot"></span>').join('')}</div>
+      </section>
+      <button class="btn btn-primary" id="s-next">다음</button>
+      <label class="btn btn-secondary file-btn">다른 폰의 백업 불러오기<input id="import-start" type="file" accept="application/json,.json" hidden></label>`;
+  } else if (startStep === 2) {
+    body = `
+      <h1>${emoji('🐣')} 함께 자랄 친구를 골라 주세요</h1>
+      <p class="lead">몸무게가 늘면 친구도 함께 자라요.</p>
+      <div class="pet-pick" role="radiogroup" aria-label="친구 고르기">
+        ${Object.entries(PETS).map(([k, name]) => `<button class="pet-option ${d.pet === k ? 'on' : ''}" role="radio" aria-checked="${d.pet === k}" data-pet="${k}">
+          ${petSvg({ kind: k, form: 0, scale: 1, size: 120 })}<span>${name}</span></button>`).join('')}
+      </div>
+      <button class="btn btn-primary" id="s-next" ${d.pet ? '' : 'disabled'}>다음</button>
+      <button class="btn btn-secondary" id="s-back">이전</button>`;
   } else {
-    const [, wm, wd] = w.date.split('-').map(Number);
-    const p = goalProgress(state.weights, state.settings.goalLow);
-    let progressHtml = '';
-    if (p) {
-      const howFar = p.percent >= 100 ? '목표에 닿았어요!'
-        : p.gained > 0 ? `${p.gained}kg 늘었어요` : '함께 가 봐요';
-      progressHtml = `
-        <div class="progress" role="progressbar" aria-label="목표 체중까지 온 정도" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p.percent}">
-          <div class="progress-fill" style="width:${Math.max(p.percent, 4)}%"><span class="progress-mark" aria-hidden="true">🌱</span></div>
-          <span class="progress-goal" aria-hidden="true">🌷</span>
+    body = `
+      <h1>${emoji('⚖️')} 몸무게를 알려 주세요</h1>
+      <section class="card card-mint">
+        <p class="label">지금 몸무게</p>
+        ${stepper('s-kg', d.kg, 0.1, 'kg', '지금 몸무게')}
+        <p class="label">언제 잰 몸무게로 친구를 키울까요?</p>
+        <div class="chips" role="group" aria-label="성장에 쓰는 측정 시점">
+          ${state.settings.timings.map((t) => `<button class="chip ${t === d.timing ? 'on' : ''}" data-timing="${esc(t)}">${esc(t)}</button>`).join('')}
         </div>
-        <p class="progress-text" title="처음 ${p.startKg}kg (${p.startDate})"><b>${p.percent}%</b> 왔어요 · ${howFar}</p>`;
+        <p class="small muted">늘 같은 때 잰 몸무게로만 자라요. 다른 때 잰 몸무게도 기록은 돼요.</p>
+      </section>
+      <section class="card card-peach">
+        <p class="label">목표 몸무게</p>
+        ${stepper('s-goal', d.goal, 0.5, 'kg', '목표 몸무게')}
+        <p class="small muted">0.5kg 늘 때마다 친구가 한 단계씩 자라고, 목표에 도착하면 마지막 모습이 돼요.</p>
+      </section>
+      <button class="btn btn-primary" id="s-done">친구 만나기</button>
+      <button class="btn btn-secondary" id="s-back">이전</button>`;
+  }
+  view.innerHTML = `<div class="start-dots" aria-label="${startStep} / 3 단계">${dots}</div>${body}`;
+  bindSteppers();
+
+  const meals = $('#s-meals');
+  meals?.addEventListener('input', () => { d.mealsPerDay = meals.value; });
+  view.querySelectorAll('[data-step="s-meals"]').forEach((b) => b.addEventListener('click', () => {
+    const v = Math.max(1, Math.min(10, Number(meals.value) || 1));
+    meals.value = v;
+    d.mealsPerDay = v;
+    renderStart();
+  }));
+  view.querySelectorAll('[data-pet]').forEach((b) => b.addEventListener('click', () => {
+    d.pet = b.dataset.pet;
+    renderStart();
+  }));
+  view.querySelectorAll('[data-timing]').forEach((b) => b.addEventListener('click', () => {
+    d.timing = b.dataset.timing;
+    view.querySelectorAll('[data-timing]').forEach((x) => x.classList.toggle('on', x === b));
+  }));
+  $('#s-kg')?.addEventListener('input', (e) => { d.kg = e.target.value; });
+  $('#s-goal')?.addEventListener('input', (e) => { d.goal = e.target.value; });
+  $('#s-back')?.addEventListener('click', () => { startStep -= 1; renderStart(); });
+  $('#import-start')?.addEventListener('change', importFromInput);
+  $('#s-next')?.addEventListener('click', () => {
+    if (startStep === 1) {
+      try { d.mealsPerDay = parseMealsPerDay(meals.value); } catch (err) { return toast(err.message); }
     }
-    weightHtml = `
-      <p class="label">${emoji('⚖️')} 지금 체중 <span class="sub">(${wm}/${wd} ${esc(w.timing)})</span></p>
-      <p class="hero"><b>${w.kg}</b><span>kg</span></p>
-      <p class="goal-line">${!goal
-        ? '<a href="#settings">설정에서 목표 체중을 입력해 주세요</a>'
-        : remain > 0
-          ? `목표 ${goal}까지 <b>${remain}kg</b> 남았어요`
-          : `목표 ${goal}에 도착했어요!`}</p>
-      ${progressHtml}`;
-  }
+    if (startStep === 2 && !d.pet) return toast('친구를 하나 골라 주세요.');
+    startStep += 1;
+    renderStart();
+  });
+  $('#s-done')?.addEventListener('click', () => {
+    d.kg = $('#s-kg').value;
+    d.goal = $('#s-goal').value;
+    const kg = round1(Number(d.kg));
+    if (!(kg >= 10 && kg <= 150)) return toast('지금 몸무게를 확인해 주세요.');
+    let goal;
+    try { goal = parseGoal(d.goal, ''); } catch (err) { return toast(err.message); }
+    if (goal.goalLow === null) return toast('목표 몸무게를 적어 주세요.');
+    if (goal.goalLow <= kg) return toast('목표 몸무게는 지금보다 무겁게 적어 주세요.');
 
-  const timings = [...new Set(state.weights.map((x) => x.timing))];
-  if (!timings.includes(chartTiming)) {
-    const count = (t) => state.weights.filter((x) => x.timing === t).length;
-    chartTiming = timings.sort((a, b) => count(b) - count(a))[0] || null;
-  }
+    // 같은 때 잰 마지막 기록과 다르면 오늘 몸무게로 남긴다 (기존 체중 기록은 그대로 둔다)
+    const lastSame = latestWeight(state.weights.filter((w) => w.timing === d.timing));
+    if (!lastSame || lastSame.kg !== kg) {
+      state.weights.push({ id: newId(), date: today(), time: nowTime(), kg, timing: d.timing });
+    }
+    state.settings = { ...state.settings, ...goal };
+    state.grow = {
+      ...g(), started: true, pet: d.pet, mealsPerDay: Number(d.mealsPerDay), timing: d.timing,
+      startKg: kg, startDate: today(),
+    };
+    persist();
+    startDraft = null;
+    startStep = 1;
+    document.body.classList.remove('onboarding');
+    history.replaceState(null, '', '#today');  // 이미 #today 로 열려 있어도 화면이 바뀌도록 직접 그린다
+    route();
+    celebrate(`${PETS[d.pet]} 친구가 태어났어요!`, '앞으로 잘 부탁해요', 0);
+  });
+}
 
-  const t = cmp.today;
-  let compareHtml = '';
-  if (cmp.yesterday || cmp.average) {
-    const parts = [];
-    if (cmp.yesterday) parts.push(`어제 ${kcalText(cmp.yesterday.kcal)}kcal`);
-    if (cmp.average) parts.push(`최근 7일 평균 ${kcalText(cmp.average.kcal)}kcal`);
-    compareHtml = `<p class="compare">${parts.join(' · ')}</p>`;
+// ───────── 오늘 (첫 화면) ─────────
+function petMessage(gs, prog) {
+  if (gs.final) return '목표에 도착했어요! 함께해 주셔서 정말 고마워요.';
+  if (gs.dropped && latestGrowWeight()?.date === today()) {
+    return '조금 줄었어도 괜찮아요. 저는 그대로 자라 있어요. 내일 또 같이 해요!';
   }
-  const praise = [];
-  if (cmp.moreThanYesterday) praise.push(`어제보다 ${kcalText(t.kcal - cmp.yesterday.kcal)}kcal 더 드셨어요`);
-  else if (cmp.moreThanAverage) praise.push(`평균보다 ${kcalText(t.kcal - cmp.average.kcal)}kcal 더 드셨어요`);
-  if (cmp.proteinMoreThanYesterday) praise.push('단백질도 어제보다 많아요');
-  else if (cmp.proteinMoreThanAverage) praise.push('단백질도 평균보다 많아요');
+  if (prog.done) return `오늘 ${prog.goal}번 다 드셨네요! 정말 최고예요!`;
+  if (prog.count === 0) return '오늘 첫 끼니를 기다리고 있어요. 천천히 드셔도 괜찮아요.';
+  return `${prog.count}번 드셨어요! ${prog.goal - prog.count}번 더 같이 해요.`;
+}
+
+function latestGrowWeight() {
+  return latestWeight(state.weights.filter((w) => w.timing === g().timing && w.date >= g().startDate));
+}
+
+function renderToday() {
+  const gs = growNow();
+  const prog = todayProgress(g().notes, today(), g().mealsPerDay);
+  const rw = rewards(g().notes, state.weights, g().mealsPerDay);
+  // 말풍선과 표정을 맞춘다: 몸무게가 줄어든 날은 응원 표정이 먼저
+  const droppedToday = !gs.final && gs.dropped && latestGrowWeight()?.date === today();
+  const mood = droppedToday ? 'cheer' : prog.done || gs.final ? 'happy' : 'normal';
+  const notes = g().notes.filter((n) => n.date === today());
+  const quick = frequentFoods(g().notes);
+  const todayWeights = state.weights.filter((w) => w.date === today());
+  const tw = latestWeight(todayWeights);
+  const last = latestWeight(state.weights);
+  const growLine = gs.final ? '마지막 모습이에요!'
+    : gs.toNext === 0 ? '곧 자랄 거예요!'
+      : gs.toNext != null ? `다음까지 ${gs.toNext}kg` : '';
+  const extra = Math.max(0, prog.count - prog.goal);
 
   view.innerHTML = `
     <header class="top">
-      <p class="date">${d.getMonth() + 1}월 ${d.getDate()}일 ${WEEKDAYS[d.getDay()]}요일</p>
-      <a class="settings-link" href="#settings" aria-label="설정">${emoji('⚙️')} 설정</a>
+      <p class="date">${dateLabel(today())}</p>
+      <p class="rewards" aria-label="모은 꽃 ${rw.flowers}개, 하트 ${rw.hearts}개">${emoji('🌸')} ${rw.flowers} &nbsp;${emoji('❤️')} ${rw.hearts}</p>
     </header>
-    <p class="cheer">${emoji('🌼')} ${esc(cheerMessage(cmp))}</p>
-    <section class="card card-peach">
-      ${weightHtml}
+
+    <section class="card card-peach pet-card">
+      <p class="bubble">${esc(petMessage(gs, prog))}</p>
+      <div class="pet-stage">${petSvg({ kind: g().pet, form: gs.form, scale: gs.scale, mood, size: 200, crop: true })}</div>
+      <p class="pet-name">${esc(PETS[g().pet])} · ${FORMS[gs.form]} 모습</p>
+      <p class="pet-level">${gs.level}/${gs.total}단계${growLine ? ` · ${growLine}` : ''}</p>
     </section>
+
     <section class="card card-butter">
-      <p class="label">${emoji('🍚')} 오늘 드신 양</p>
-      <div class="totals">
-        <div><b>${kcalText(t.kcal)}</b><span>kcal</span></div>
-        <div><b>${gText(t.protein)}</b><span>g 단백질</span></div>
+      <h2>${emoji('🍚')} 오늘 먹은 음식</h2>
+      <div class="slots" role="img" aria-label="오늘 ${prog.goal}번 중 ${Math.min(prog.count, prog.goal)}번 먹었어요">
+        ${Array.from({ length: prog.goal }, (_, i) => `<span class="slot ${i < prog.count ? 'on' : ''}">${i < prog.count ? '✓' : ''}</span>`).join('')}
+        ${extra ? `<span class="slot-extra">+${extra}</span>` : ''}
       </div>
-      ${praise.length ? `<p class="praise">${emoji('👏')} ${praise.join(', ')}!</p>` : ''}
-      ${compareHtml}
+      <form id="note-form" class="note-form">
+        <input id="note" class="text-input" type="text" maxlength="30" placeholder="드신 음식 이름" autocomplete="off" aria-label="드신 음식 이름">
+        <button class="btn btn-primary" type="submit">적기</button>
+      </form>
+      ${cautionNote ? `<p class="knote k-high" role="status">${esc(cautionNote)}</p>` : ''}
+      ${quick.length ? `<p class="label">자주 드신 음식</p>
+        <div class="quick">${quick.map((q) => `<button class="chip quick-btn" data-quick="${esc(q)}">${esc(q)}</button>`).join('')}</div>` : ''}
+      ${notes.length ? `<ul class="list">${notes.map((n) => {
+        const warn = cautionMatches(n.name, g().cautionWords).length;
+        return `<li><div class="li-main"><b>${esc(n.name)}</b><span>${esc(n.time || '')}</span>
+          ${warn ? '<span class="kbadge k-high">칼륨 주의</span>' : ''}</div>
+          <button class="btn-text" data-del-note="${n.id}">지우기</button></li>`;
+      }).join('')}</ul>` : '<p class="muted">아직 적은 음식이 없어요. 드신 걸 하나씩 적어 볼까요?</p>'}
     </section>
-    <a class="btn btn-primary" href="#meal">${emoji('🍽️')} 식사 기록하기</a>
+
+    <section class="card card-mint">
+      <h2>${emoji('⚖️')} 오늘 몸무게</h2>
+      ${tw && !weightEditing ? `
+        <p class="hero"><b>${tw.kg}</b><span>kg</span></p>
+        <p class="muted">${esc(tw.timing)}에 쟀어요</p>
+        <button class="btn btn-secondary" id="w-again">다시 적기</button>` : `
+        ${stepper('w-kg', last ? last.kg : '', 0.1, 'kg', '오늘 몸무게')}
+        <div class="chips" role="group" aria-label="측정 시점">
+          ${state.settings.timings.map((t) => `<button class="chip ${t === g().timing ? 'on' : ''}" data-wtiming="${esc(t)}">${esc(t)}</button>`).join('')}
+        </div>
+        <button class="btn btn-primary" id="w-save">몸무게 저장</button>`}
+      <p class="small muted">친구는 "${esc(g().timing)}" 몸무게로 자라요.</p>
+    </section>`;
+
+  bindSteppers();
+  $('#note-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    addNote($('#note').value);
+  });
+  view.querySelectorAll('[data-quick]').forEach((b) => b.addEventListener('click', () => addNote(b.dataset.quick)));
+  view.querySelectorAll('[data-del-note]').forEach((b) => b.addEventListener('click', () => {
+    const n = g().notes.find((x) => x.id === b.dataset.delNote);
+    if (n && confirm(`"${n.name}" 기록을 지울까요?`)) {
+      g().notes = g().notes.filter((x) => x.id !== n.id);
+      cautionNote = '';
+      persist();
+      renderToday();
+    }
+  }));
+  $('#w-again')?.addEventListener('click', () => { weightEditing = true; renderToday(); });
+  let timing = g().timing;
+  view.querySelectorAll('[data-wtiming]').forEach((b) => b.addEventListener('click', () => {
+    timing = b.dataset.wtiming;
+    view.querySelectorAll('[data-wtiming]').forEach((x) => x.classList.toggle('on', x === b));
+  }));
+  $('#w-save')?.addEventListener('click', () => saveWeight($('#w-kg').value, timing));
+}
+
+function addNote(text) {
+  let name;
+  try { name = parseFoodName(text); } catch (err) { return toast(err.message); }
+  const before = todayProgress(g().notes, today(), g().mealsPerDay);
+  g().notes.push({ id: newId(), date: today(), time: nowTime(), name });
+  persist();
+  const after = todayProgress(g().notes, today(), g().mealsPerDay);
+  const words = cautionMatches(name, g().cautionWords);
+  // 칼륨 주의: 부드럽게 알려 주기만 하고 기록은 막지 않는다
+  cautionNote = words.length
+    ? `"${words.join(', ')}"은(는) 칼륨 주의 음식으로 적어 두신 거예요. 기록은 그대로 했어요.`
+    : '';
+  renderToday();
+  if (!before.done && after.done) {
+    celebrate(`오늘 ${after.goal}번 다 드셨어요!`, '정말 잘하셨어요. 친구도 신났어요!');
+  } else {
+    toast(`잘 드셨어요! (${Math.min(after.count, after.goal)}/${after.goal})`);
+  }
+}
+
+function saveWeight(value, timing) {
+  const kg = round1(Number(value));
+  if (!(kg >= 10 && kg <= 150)) return toast('몸무게 숫자를 다시 확인해 주세요.');
+  const before = growNow();
+  state.weights.push({ id: newId(), date: today(), time: nowTime(), kg, timing });
+  persist();
+  weightEditing = false;
+  const after = growNow();
+  renderToday();
+  if (after.final && !before.final) {
+    celebrate('목표에 도착했어요!', '친구가 마지막 모습이 됐어요. 정말 고마워요!');
+  } else if (after.level > before.level) {
+    celebrate('친구가 쑥 자랐어요!', `${after.level}단계 · ${FORMS[after.form]} 모습`);
+  } else if (timing === g().timing && after.dropped) {
+    toast('괜찮아요, 내일 또 같이 해요 💛');
+  } else {
+    toast('몸무게를 적어 주셔서 고마워요!');
+  }
+}
+
+// ───────── 기록: 체중 그래프, 지난 기록 ─────────
+function renderRecords() {
+  const timings = [...new Set(state.weights.map((x) => x.timing))];
+  if (!timings.includes(chartTiming)) chartTiming = timings.includes(g().timing) ? g().timing : timings[0] ?? null;
+  const recent = [...state.weights].sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || ''))).slice(0, 10);
+  const rw = rewards(g().notes, state.weights, g().mealsPerDay);
+  const streak = recordStreak(g().notes, state.weights, today());
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(today(), -i);
+    // 예전 화면에서 적은 식사 기록도 이름으로 함께 보여 준다
+    const names = [...g().notes.filter((n) => n.date === d).map((n) => n.name),
+      ...state.meals.filter((m) => m.date === d).map((m) => m.name)];
+    if (names.length) days.push({ d, names, count: g().notes.filter((n) => n.date === d).length });
+  }
+
+  view.innerHTML = `
+    <h1>${emoji('📅')} 기록</h1>
     <section class="card card-sky">
-      <p class="label">${emoji('📈')} 체중 그래프</p>
+      <h2>${emoji('📈')} 몸무게 그래프</h2>
       ${timings.length > 1 ? `<div class="chips small" role="group" aria-label="그래프 측정 시점">
-        ${timings.map((x) => `<button class="chip ${x === chartTiming ? 'on' : ''}" data-timing="${esc(x)}">${esc(x)}</button>`).join('')}
+        ${timings.map((x) => `<button class="chip ${x === chartTiming ? 'on' : ''}" data-ctiming="${esc(x)}">${esc(x)}</button>`).join('')}
       </div>` : ''}
       <div id="chart" class="chart-box"></div>
-    </section>`;
-
-  view.querySelectorAll('[data-timing]').forEach((b) => b.addEventListener('click', () => {
-    chartTiming = b.dataset.timing;
-    renderHome();
-  }));
-  drawChart();
-}
-
-function drawChart() {
-  const box = $('#chart');
-  if (!box) return;
-  const byDate = new Map();
-  const sorted = [...state.weights].sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
-  for (const w of sorted) if (w.timing === chartTiming) byDate.set(w.date, w.kg); // 같은 날은 마지막 값
-  const points = [...byDate].map(([date, kg]) => ({ date, kg }));
-  renderWeightChart(box, points, state.settings.goalLow, state.settings.goalHigh);
-}
-
-// ───────── 식사 기록 ─────────
-function resultItem(f, attr = 'data-code') {
-  const info = isRecordable(f)
-    ? `${esc(f.rest || f.origin)} · ${basisText(f)}당 ${kcalText(f.kcal)}kcal`
-    : `${esc(f.origin)} · <span class="tag">수치 입력 필요</span>`;
-  return `<li><button class="result" ${attr}="${esc(f.code)}">
-    ${foodIcon(f)}<span class="result-text"><b>${esc(f.name)}</b><span class="rest">${info}</span></span>
-  </button></li>`;
-}
-
-function renderMeal() {
-  const favs = state.favorites.map(getFood).filter(Boolean);
-  const todays = state.meals.filter((m) => m.date === today());
-
-  const tones = ['peach', 'mint', 'sky', 'butter'];
-  view.innerHTML = `
-    <h1>${emoji('🍚')} 식사 기록</h1>
-    ${favs.length ? `<section>
-      <h2>${emoji('⭐')} 즐겨찾기</h2>
-      <div class="fav-grid">${favs.map((f, i) => `<button class="fav fav-${tones[i % tones.length]}" data-code="${esc(f.code)}">
-        <span class="fav-emoji" aria-hidden="true">${foodEmoji(f)}</span><span class="fav-name">${esc(f.name)}</span></button>`).join('')}</div>
-    </section>` : ''}
-    <section>
-      <h2>${emoji('🔍')} 음식 찾기</h2>
-      <input id="q" class="search" type="search" placeholder="음식 이름을 써 보세요 (예: 죽, 계란)" autocomplete="off" value="${esc(lastQuery)}">
-      <ul id="results" class="results"></ul>
     </section>
     <section class="card card-cream">
-      <h2>${emoji('🍽️')} 오늘 드신 음식</h2>
-      ${todays.length ? `<ul class="list">${todays.map((m) => {
-        const n = mealNutrients(m);
-        const f = getFood(m.code) || { name: m.name, unit: m.unit };
-        return `<li>
-          ${foodIcon(f)}
-          <div class="li-main"><b>${esc(m.name)}</b>
-            <span>${esc(amountText(m.unit, m.amount, m.amountLabel))} · ${kcalText(n.kcal)}kcal · 단백질 ${gText(n.protein)}g</span>
-            ${potassiumBadge(n.potassium, n.potassiumPartial)}</div>
-          <button class="btn-text" data-del-meal="${m.id}">지우기</button>
-        </li>`;
-      }).join('')}</ul>` : '<p class="muted">아직 기록이 없어요. 드신 걸 하나씩 남겨 볼까요?</p>'}
-    </section>`;
-
-  const q = $('#q');
-  const results = $('#results');
-  const doSearch = () => {
-    lastQuery = q.value;
-    if (!foodsReady) {
-      results.innerHTML = '<li class="muted">음식 정보를 불러오는 중이에요…</li>';
-      return;
-    }
-    const hits = searchFoods(q.value);
-    results.innerHTML = q.value.trim() && !hits.length
-      ? '<li class="muted">찾는 음식이 없어요. 다른 이름으로도 찾아볼까요?</li>'
-      : hits.map((f) => resultItem(f)).join('');
-  };
-  q.addEventListener('input', doSearch);
-  if (lastQuery) doSearch();
-
-  view.addEventListener('click', onMealClick);
-}
-
-function onMealClick(e) {
-  const pick = e.target.closest('[data-code]');
-  if (pick && view.contains(pick)) return openAmountSheet(pick.dataset.code);
-  const del = e.target.closest('[data-del-meal]');
-  if (del) {
-    const m = state.meals.find((x) => x.id === del.dataset.delMeal);
-    if (m && confirm(`"${m.name}" 기록을 지울까요?`)) {
-      state.meals = state.meals.filter((x) => x.id !== m.id);
-      persist();
-      route();
-    }
-  }
-}
-
-// 양 고르기 버튼. 개수 단위 → 한 그릇 → 그램 순서로 정해진 것을 쓴다.
-function amountOptions(food) {
-  if (food.custom === 'recipe') {
-    return { opts: [0.5, 1, 1.5, 2].map((n) => ({ label: n === 0.5 ? '반 인분' : `${n}인분`, amount: n })), def: 1 };
-  }
-  const u = state.units[food.code];
-  if (u) {
-    const opts = [0.5, 1, 2, 3].map((n) => {
-      const label = n === 0.5 ? `반 ${u.name}` : `${n}${u.name}`;
-      return { label, sub: `${gText(n * u.amount)}${food.unit}`, amount: n * u.amount, amountLabel: label };
-    });
-    return { opts, def: 1 };
-  }
-  const s = state.servings[food.code];
-  const word = servingWord(food);
-  const opts = [];
-  if (s) {
-    for (const n of [0.5, 1, 1.5, 2]) {
-      const label = n === 0.5 ? `반 ${word}` : `${n} ${word}`;
-      opts.push({ label, sub: `${gText(n * s)}${food.unit}`, amount: n * s, amountLabel: label });
-    }
-  } else {
-    for (const a of [50, 100, 150, 200]) opts.push({ label: `${a}${food.unit}`, amount: a });
-  }
-  const extra = food.custom === 'label' ? food.basis : food.size;
-  if (extra && extra !== 100 && !opts.some((o) => o.amount === extra)) {
-    const label = food.custom === 'label' ? '라벨 기준량' : food.rest ? '제품 1개' : '1인분';
-    opts.push({ label, sub: `${gText(extra)}${food.unit}`, amount: extra });
-  }
-  return { opts, def: 1 };
-}
-
-function sourceLine(food) {
-  const vals = `${basisText(food)}당 ${orBlank(food.kcal, (v) => `${kcalText(v)}kcal`)} · 단백질 ${orBlank(food.protein, (v) => `${gText(v)}g`)}`
-    + ` · 칼륨 ${food.potassium == null ? '정보 없음' : `${gText(food.potassium)}mg${food.potassiumPartial ? ' (일부 정보 없음)' : ''}`}`;
-  if (food.custom === 'recipe') return `영양 수치: 직접 만든 음식 (재료 수치를 더함), ${vals}`;
-  if (food.custom === 'label') return `영양 수치: ${SOURCE_LABEL}, ${vals}`;
-  return `영양 수치: 식품의약품안전처, ${vals}`;
-}
-
-function openAmountSheet(code) {
-  const food = getFood(code);
-  if (!food) return;
-  const sheet = $('#sheet');
-  let { opts, def } = amountOptions(food);
-  let amount = opts[def].amount;
-  let amountLabel = opts[def].amountLabel ?? null;
-  const word = servingWord(food);
-  const canRecord = isRecordable(food);
-  const per = foodPer(food);
-
-  const draw = () => {
-    const n = mealNutrients({ per, basis: food.basis, amount });
-    const fav = state.favorites.includes(food.code);
-    const u = state.units[food.code];
-    const resultHtml = canRecord
-      ? `<p><b>${kcalText(n.kcal)}</b> kcal · 단백질 <b>${gText(n.protein)}</b> g</p>
-         <p class="muted small">${esc(amountText(food.unit, amount, amountLabel))} 기준</p>
-         ${potassiumNote(n, food)}`
-      : `<p class="knote k-unknown">칼로리·단백질·기준량을 아직 입력하지 않았어요.<br>설정 → 직접 입력 음식에서 라벨 수치를 넣으면 기록할 수 있어요.</p>`;
-    const fine = food.custom === 'recipe'
-      ? `<details class="fine">
-          <summary>재료 보기</summary>
-          <ul class="ing-mini">${food.items.map((it) => `<li>${esc(it.name)} ${esc(amountText(it.unit, it.amount, it.amountLabel))}${it.source === SOURCE_LABEL ? ' (직접 입력)' : ''}</li>`).join('')}</ul>
-          <p class="muted small">${esc(sourceLine(food))}</p>
-        </details>`
-      : `<details class="fine">
-          <summary>양 직접 입력 · 한 ${word} 무게 · 개수 단위</summary>
-          <label>직접 입력 <input id="custom" type="number" inputmode="decimal" min="1" step="1" value="${round1(amount)}"> ${food.unit}</label>
-          <label>한 ${word} = <input id="serving" type="number" inputmode="decimal" min="1" step="1" value="${state.servings[food.code] ?? ''}" placeholder="예: 250"> ${food.unit}</label>
-          <label>개수 단위 <input id="unit-name" class="short" type="text" maxlength="5" value="${esc(u?.name ?? '')}" placeholder="개">
-            하나 = <input id="unit-amount" type="number" inputmode="decimal" min="1" step="1" value="${u?.amount ?? ''}" placeholder="예: 50"> ${food.unit}</label>
-          <button class="btn-text" id="apply-fine">적용</button>
-          <p class="muted small">${esc(sourceLine(food))}</p>
-        </details>`;
-
-    sheet.innerHTML = `
-      <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-        <h2 id="sheet-title">${foodIcon(food)} ${esc(food.name)}</h2>
-        <p class="rest">${esc(food.rest || food.origin)}</p>
-        ${canRecord ? `<p class="label">얼마나 드셨어요?</p>
-        <div class="amounts">${opts.map((o, i) => `<button class="amount ${o.amount === amount && (o.amountLabel ?? null) === amountLabel ? 'on' : ''}" data-i="${i}">
-          ${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</button>`).join('')}</div>` : ''}
-        <div class="result-box">${resultHtml}</div>
-        <button class="btn btn-primary" id="save-meal" ${canRecord ? '' : 'disabled'}>기록하기</button>
-        <div class="sheet-row">
-          <button class="btn btn-secondary" id="fav">${fav ? '★ 즐겨찾기 해제' : '☆ 즐겨찾기'}</button>
-          <button class="btn btn-secondary" id="close">닫기</button>
-        </div>
-        ${canRecord ? fine : ''}
-      </div>`;
-
-    sheet.querySelectorAll('.amount').forEach((b) => b.addEventListener('click', () => {
-      const o = opts[Number(b.dataset.i)];
-      amount = o.amount;
-      amountLabel = o.amountLabel ?? null;
-      draw();
-    }));
-    $('#save-meal', sheet).addEventListener('click', () => {
-      if (!canRecord) return;
-      state.meals.push({
-        id: newId(), date: today(), time: nowTime(), code: food.code, name: food.name, rest: food.rest,
-        unit: food.unit, amount, amountLabel, basis: food.basis, per, source: food.source,
-      });
-      persist();
-      closeSheet();
-      lastQuery = '';
-      celebrate();
-      // 주소에 음식이 지정된 채로 열렸으면(#meal?food=…) 지워야 기록 뒤에 창이 다시 열리지 않는다
-      if (location.hash.includes('food=')) history.replaceState(null, '', '#meal');
-      route();
-    });
-    $('#fav', sheet).addEventListener('click', () => {
-      setFavorite(food.code, !fav);
-      persist();
-      draw();
-    });
-    $('#close', sheet).addEventListener('click', closeSheet);
-    $('#apply-fine', sheet)?.addEventListener('click', () => {
-      let unit;
-      try {
-        unit = parseCountUnit($('#unit-name', sheet).value, $('#unit-amount', sheet).value);
-      } catch (err) {
-        return toast(err.message);
-      }
-      const c = Number($('#custom', sheet).value);
-      const s = Number($('#serving', sheet).value);
-      const unitChanged = JSON.stringify(unit) !== JSON.stringify(state.units[food.code] ?? null);
-      const servingChanged = s > 0 && s !== state.servings[food.code];
-      if (unitChanged || servingChanged) {
-        if (unitChanged) {
-          if (unit) state.units[food.code] = unit;
-          else delete state.units[food.code];
-        }
-        if (servingChanged) state.servings[food.code] = s;
-        persist();
-        ({ opts, def } = amountOptions(food));
-        amount = opts[def].amount;
-        amountLabel = opts[def].amountLabel ?? null;
-      } else if (c > 0) {
-        amount = c;
-        amountLabel = null;
-      }
-      draw();
-    });
-  };
-  draw();
-  sheet.hidden = false;
-  document.body.classList.add('sheet-open');
-}
-
-function closeSheet() {
-  $('#sheet').hidden = true;
-  $('#sheet').innerHTML = '';
-  document.body.classList.remove('sheet-open');
-}
-
-// ───────── 직접 만든 음식 (재료를 골라 1인분 만들기) ─────────
-let recipeDraft = null;   // {forId, name, items, fav}
-let pendingIng = null;    // 넣으려고 고른 재료 {food, amount, amountLabel}
-let ingQuery = '';
-
-function renderRecipe(params) {
-  const id = params.get('id') || 'new';
-  const existing = state.customFoods.find((c) => c.code === id && c.kind === 'recipe');
-  if (!recipeDraft || recipeDraft.forId !== id) {
-    recipeDraft = existing
-      ? { forId: id, name: existing.name, items: JSON.parse(JSON.stringify(existing.items)), fav: state.favorites.includes(id) }
-      : { forId: 'new', name: '', items: [], fav: true };
-    pendingIng = null;
-    ingQuery = '';
-  }
-  const d = recipeDraft;
-  let total = null;
-  if (d.items.length) total = recipeNutrients(d.items);
-
-  let addHtml;
-  if (pendingIng) {
-    const f = pendingIng.food;
-    const u = state.units[f.code];
-    const unitBtns = u ? [0.5, 1, 2].map((n) => {
-      const label = n === 0.5 ? `반 ${u.name}` : `${n}${u.name}`;
-      return `<button class="amount ${pendingIng.amountLabel === label ? 'on' : ''}" data-ing-unit="${n}">${esc(label)}<small>${gText(n * u.amount)}${f.unit}</small></button>`;
-    }).join('') : '';
-    addHtml = `<div class="add-panel">
-      <p><b>${esc(f.name)}</b> <span class="rest">${esc(f.rest || f.origin)} · ${basisText(f)}당 ${kcalText(f.kcal)}kcal</span></p>
-      ${u ? `<div class="amounts three">${unitBtns}</div>` : ''}
-      <label>양 <input id="ing-amount" type="number" inputmode="decimal" min="0.1" step="any" value="${pendingIng.amount ?? ''}" placeholder="숫자"> ${f.unit}</label>
-      <div class="sheet-row">
-        <button class="btn btn-primary" id="ing-add">재료 넣기</button>
-        <button class="btn btn-secondary" id="ing-cancel">취소</button>
-      </div>
-    </div>`;
-  } else {
-    addHtml = `<input id="ing-q" class="search" type="search" placeholder="재료 찾기 (예: 쌀밥, 달걀)" autocomplete="off" value="${esc(ingQuery)}">
-      <ul id="ing-results" class="results"></ul>
-      <p class="small muted">식약처 자료와 직접 입력 음식(제품 라벨)에서 고를 수 있어요. 자료에 없는 재료(예: 참기름)는 먼저 설정 → 직접 입력 음식으로 등록해 주세요.</p>`;
-  }
-
-  view.innerHTML = `
-    <header class="top"><h1>${existing ? '만든 음식 고치기' : '음식 만들기'}</h1><a class="settings-link" href="#settings">취소</a></header>
-    <section class="card">
-      <label class="field">음식 이름<input id="r-name" class="text-input" maxlength="30" value="${esc(d.name)}" placeholder="예: 간장계란밥"></label>
-      <p class="label">1인분에 들어가는 재료</p>
-      ${d.items.length ? `<ul class="list">${d.items.map((it, i) => {
-        const n = mealNutrients(it);
-        return `<li><div class="li-main"><b>${esc(it.name)}</b>
-          <span>${esc(amountText(it.unit, it.amount, it.amountLabel))} · ${kcalText(n.kcal)}kcal · 단백질 ${gText(n.protein)}g${it.source === SOURCE_LABEL ? ' · 직접 입력' : ''}</span>
-          ${potassiumBadge(n.potassium, n.potassiumPartial)}</div>
-          <button class="btn-text" data-del-ing="${i}">빼기</button></li>`;
-      }).join('')}</ul>` : '<p class="muted">아직 재료가 없어요.</p>'}
-      <h2>재료 넣기</h2>
-      ${addHtml}
+      <h2>${emoji('🎁')} 모은 선물</h2>
+      <p>${emoji('🌸')} 꽃 <b>${rw.flowers}</b>송이 · ${emoji('❤️')} 하트 <b>${rw.hearts}</b>개</p>
+      ${streak >= 2 ? `<p>${streak}일째 함께 기록하고 있어요!</p>` : ''}
+      <p class="small muted">기록한 날마다 꽃 한 송이, 하루 ${g().mealsPerDay}번을 다 채운 날마다 하트 하나를 모아요.</p>
     </section>
-    <section class="card">
-      <p class="label">1인분 합계</p>
-      ${total ? `<p class="sum-line"><b>${kcalText(total.kcal)}</b> kcal · 단백질 <b>${gText(total.protein)}</b> g</p>
-        ${potassiumNote(total, { custom: 'recipe' })}` : '<p class="muted">재료를 넣으면 계산돼요.</p>'}
-      <p class="small muted">영양 수치는 재료 수치를 더한 값이에요.</p>
+    <section class="card card-butter">
+      <h2>${emoji('🍚')} 지난 7일 먹은 음식</h2>
+      ${days.length ? `<ul class="list">${days.map((x) => `<li><div class="li-main"><b>${dateLabel(x.d)}</b>
+        <span>${esc(x.names.join(', '))}</span></div><span class="day-count">${x.count}/${g().mealsPerDay}</span></li>`).join('')}</ul>`
+        : '<p class="muted">아직 기록이 없어요.</p>'}
     </section>
-    <label class="check"><input type="checkbox" id="r-fav" ${d.fav ? 'checked' : ''}> 즐겨찾기에 바로 추가</label>
-    <button class="btn btn-primary" id="r-save">저장하기</button>
-    ${existing ? '<button class="btn btn-secondary danger" id="r-del">이 음식 지우기</button>' : ''}`;
-
-  $('#r-name').addEventListener('input', (e) => { d.name = e.target.value; });
-  $('#r-fav').addEventListener('change', (e) => { d.fav = e.target.checked; });
-  view.querySelectorAll('[data-del-ing]').forEach((b) => b.addEventListener('click', () => {
-    d.items.splice(Number(b.dataset.delIng), 1);
-    renderRecipe(params);
-  }));
-
-  if (pendingIng) {
-    const f = pendingIng.food;
-    view.querySelectorAll('[data-ing-unit]').forEach((b) => b.addEventListener('click', () => {
-      const n = Number(b.dataset.ingUnit);
-      const u = state.units[f.code];
-      pendingIng.amount = n * u.amount;
-      pendingIng.amountLabel = n === 0.5 ? `반 ${u.name}` : `${n}${u.name}`;
-      renderRecipe(params);
-    }));
-    $('#ing-amount').addEventListener('input', (e) => {
-      pendingIng.amount = Number(e.target.value) || null;
-      pendingIng.amountLabel = null;
-      view.querySelectorAll('[data-ing-unit]').forEach((x) => x.classList.remove('on'));
-    });
-    $('#ing-add').addEventListener('click', () => {
-      if (!(pendingIng.amount > 0)) return toast('재료의 양을 넣어 주세요.');
-      d.items.push({
-        code: f.code, name: f.name, unit: f.unit, basis: f.basis, amount: pendingIng.amount,
-        amountLabel: pendingIng.amountLabel, per: foodPer(f), source: f.source,
-      });
-      pendingIng = null;
-      ingQuery = '';
-      renderRecipe(params);
-    });
-    $('#ing-cancel').addEventListener('click', () => { pendingIng = null; renderRecipe(params); });
-  } else {
-    const q = $('#ing-q');
-    const results = $('#ing-results');
-    const doSearch = () => {
-      ingQuery = q.value;
-      if (!foodsReady) {
-        results.innerHTML = '<li class="muted">음식 정보를 불러오는 중이에요…</li>';
-        return;
-      }
-      const hits = searchFoods(q.value, 30, ['label', 'data']);
-      results.innerHTML = q.value.trim() && !hits.length
-        ? '<li class="muted">찾는 재료가 없어요. 자료에 없으면 직접 입력 음식으로 등록해 주세요.</li>'
-        : hits.map((f) => resultItem(f, 'data-ing')).join('');
-    };
-    q.addEventListener('input', doSearch);
-    if (ingQuery) doSearch();
-    results.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-ing]');
-      if (!b) return;
-      const f = getFood(b.dataset.ing);
-      if (!isRecordable(f)) return toast('이 음식은 아직 라벨 수치를 입력하지 않았어요.');
-      const u = state.units[f.code];
-      pendingIng = u ? { food: f, amount: u.amount, amountLabel: `1${u.name}` } : { food: f, amount: null, amountLabel: null };
-      renderRecipe(params);
-    });
-  }
-
-  $('#r-save').addEventListener('click', () => {
-    const name = d.name.trim();
-    if (!name) return toast('음식 이름을 써 주세요.');
-    if (!d.items.length) return toast('재료를 하나 이상 넣어 주세요.');
-    const t = recipeNutrients(d.items);
-    const code = existing ? existing.code : `my-${newId()}`;
-    upsertCustom({
-      code, kind: 'recipe', name, items: d.items,
-      kcal: t.kcal, protein: t.protein, potassium: t.potassium, potassiumPartial: t.potassiumPartial,
-      updated: today(),
-    });
-    setFavorite(code, d.fav);
-    persist();
-    recipeDraft = null;
-    toast(`"${name}"을(를) 저장했어요.`);
-    location.hash = '#settings';
-  });
-  $('#r-del')?.addEventListener('click', () => {
-    if (!confirm(`"${existing.name}"을(를) 지울까요?\n이미 기록한 식사는 그대로 남아요.`)) return;
-    removeCustom(existing.code);
-    persist();
-    recipeDraft = null;
-    location.hash = '#settings';
-  });
-}
-
-// ───────── 직접 입력 음식 (제품 라벨) ─────────
-function renderLabel(params) {
-  const id = params.get('id') || 'new';
-  const existing = state.customFoods.find((c) => c.code === id && c.kind === 'label');
-  const c = existing || { name: '', basis: null, unit: null, kcal: null, protein: null, potassium: null };
-  const u = existing ? state.units[existing.code] : null;
-  let unit = c.unit;
-  const val = (v) => (v == null ? '' : v);
-
-  view.innerHTML = `
-    <header class="top"><h1>${existing ? '직접 입력 음식 고치기' : '라벨 보고 등록하기'}</h1><a class="settings-link" href="#settings">취소</a></header>
-    <p class="notice">포장지 영양성분표의 수치를 그대로 옮겨 적어 주세요. 모르는 칸은 비워 두면 '정보 없음'으로 처리돼요(0으로 계산하지 않아요).</p>
-    <section class="card">
-      <label class="field">음식 이름<input id="l-name" class="text-input" maxlength="30" value="${esc(c.name)}" placeholder="제품 이름"></label>
-      <p class="label">라벨 기준량</p>
-      <p class="small muted">라벨에 "1팩(200ml)당"처럼 적힌 기준이에요.</p>
-      <div class="pair">
-        <input id="l-basis" type="number" inputmode="decimal" min="0" step="any" value="${val(c.basis)}">
-        <div class="chips" role="group" aria-label="기준량 단위">
-          <button class="chip ${unit === 'g' ? 'on' : ''}" data-unit="g">g</button>
-          <button class="chip ${unit === 'ml' ? 'on' : ''}" data-unit="ml">ml</button>
-        </div>
-      </div>
-      <label class="row">칼로리 <input id="l-kcal" type="number" inputmode="decimal" min="0" step="any" value="${val(c.kcal)}"> kcal</label>
-      <label class="row">단백질 <input id="l-protein" type="number" inputmode="decimal" min="0" step="any" value="${val(c.protein)}"> g</label>
-      <label class="row">칼륨 <input id="l-potassium" type="number" inputmode="decimal" min="0" step="any" value="${val(c.potassium)}"> mg</label>
-      <p class="small muted">라벨에 칼륨이 없으면 비워 두세요. "칼륨 정보 없음"으로 보여요.</p>
-      <label class="row">포장 단위 <input id="l-unitname" class="short" type="text" maxlength="5" value="${esc(u?.name ?? '')}" placeholder="팩"></label>
-      <p class="small muted">쓰면 기록할 때 "1팩 = 기준량"으로 고를 수 있어요. (선택)</p>
-      <p class="small">출처 표시: <b>${SOURCE_LABEL}</b></p>
-    </section>
-    <label class="check"><input type="checkbox" id="l-fav" ${!existing || state.favorites.includes(existing.code) ? 'checked' : ''}> 즐겨찾기에 바로 추가</label>
-    <button class="btn btn-primary" id="l-save">저장하기</button>
-    ${existing ? '<button class="btn btn-secondary danger" id="l-del">이 음식 지우기</button>' : ''}`;
-
-  view.querySelectorAll('[data-unit]').forEach((b) => b.addEventListener('click', () => {
-    unit = b.dataset.unit;
-    view.querySelectorAll('[data-unit]').forEach((x) => x.classList.toggle('on', x === b));
-  }));
-  $('#l-save').addEventListener('click', () => {
-    let f, countUnit = null;
-    try {
-      f = parseLabelFood({
-        name: $('#l-name').value, basis: $('#l-basis').value, unit,
-        kcal: $('#l-kcal').value, protein: $('#l-protein').value, potassium: $('#l-potassium').value,
-      });
-      const un = $('#l-unitname').value.trim();
-      if (un) {
-        if (f.basis === null) throw new Error('포장 단위를 쓰려면 라벨 기준량도 넣어 주세요.');
-        countUnit = parseCountUnit(un, f.basis);
-      }
-    } catch (err) {
-      return toast(err.message);
-    }
-    const code = existing ? existing.code : `my-${newId()}`;
-    upsertCustom({ code, kind: 'label', ...f, updated: today() });
-    if (countUnit) state.units[code] = countUnit;
-    else delete state.units[code];
-    setFavorite(code, $('#l-fav').checked);
-    refreshRecipesUsing(code);
-    persist();
-    toast(isRecordable(getFood(code)) ? `"${f.name}"을(를) 저장했어요.` : `"${f.name}"을(를) 저장했어요. 수치를 채우면 기록할 수 있어요.`);
-    location.hash = '#settings';
-  });
-  $('#l-del')?.addEventListener('click', () => {
-    if (!confirm(`"${existing.name}"을(를) 지울까요?\n이미 기록한 식사와 이 재료로 만든 음식은 그대로 남아요.`)) return;
-    removeCustom(existing.code);
-    persist();
-    location.hash = '#settings';
-  });
-}
-
-// 라벨 수치를 고치면 그 음식을 재료로 쓴 '직접 만든 음식'도 다시 계산한다.
-function refreshRecipesUsing(code) {
-  const f = getFood(code);
-  if (!isRecordable(f)) return;
-  for (const r of state.customFoods) {
-    if (r.kind !== 'recipe' || !r.items.some((it) => it.code === code)) continue;
-    r.items = r.items.map((it) => (it.code === code ? { ...it, name: f.name, unit: f.unit, basis: f.basis, per: foodPer(f) } : it));
-    Object.assign(r, recipeNutrients(r.items));
-    delete r.missingCount;
-  }
-  setCustomFoods(state.customFoods);
-}
-
-// ───────── 체중 ─────────
-function renderWeight() {
-  const last = latestWeight(state.weights);
-  const timings = state.settings.timings;
-  const kg = last ? last.kg : '';
-  let timing = last && timings.includes(last.timing) ? last.timing : timings[0];
-  const recent = [...state.weights].sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || ''))).slice(0, 10);
-
-  view.innerHTML = `
-    <h1>${emoji('⚖️')} 체중 기록</h1>
     <section class="card card-mint">
-      <p class="label">몸무게</p>
-      <div class="stepper">
-        <button class="step" id="minus" aria-label="0.1 kg 빼기">−</button>
-        <label class="kg-input"><input id="kg" type="number" inputmode="decimal" step="0.1" min="10" max="150" value="${kg}" placeholder="0.0"><span>kg</span></label>
-        <button class="step" id="plus" aria-label="0.1 kg 더하기">+</button>
-      </div>
-      <p class="label">날짜</p>
-      <input id="wdate" class="date-input" type="date" value="${today()}" max="${today()}">
-      <p class="label">언제 재셨어요?</p>
-      <div class="chips" role="group" aria-label="측정 시점">
-        ${timings.map((t) => `<button class="chip ${t === timing ? 'on' : ''}" data-t="${esc(t)}">${esc(t)}</button>`).join('')}
-      </div>
-      <button class="btn btn-primary" id="save-weight">저장하기</button>
-    </section>
-    <section>
-      <h2>${emoji('🗓️')} 최근 기록</h2>
-      ${recent.length ? `<ul class="list">${recent.map((w) => {
-        const [, m, d] = w.date.split('-').map(Number);
-        return `<li><div class="li-main"><b>${w.kg}kg</b><span>${m}월 ${d}일 · ${esc(w.timing)}</span></div>
-          <button class="btn-text" data-del-weight="${w.id}">지우기</button></li>`;
-      }).join('')}</ul>` : '<p class="muted">아직 기록이 없어요.</p>'}
+      <h2>${emoji('⚖️')} 몸무게 기록</h2>
+      ${recent.length ? `<ul class="list">${recent.map((w) => `<li><div class="li-main"><b>${w.kg}kg</b>
+        <span>${dateLabel(w.date)} · ${esc(w.timing)}</span></div>
+        <button class="btn-text" data-del-weight="${w.id}">지우기</button></li>`).join('')}</ul>` : '<p class="muted">아직 기록이 없어요.</p>'}
+      <p class="small muted">잘못 적은 몸무게를 지우면, 그 기록으로 자란 단계도 함께 돌아가요.</p>
     </section>`;
 
-  const input = $('#kg');
-  const bump = (d) => {
-    if (input.value === '') return input.focus(); // 처음에는 숫자를 직접 입력
-    input.value = round1(Number(input.value) + d).toFixed(1);
-  };
-  $('#minus').addEventListener('click', () => bump(-0.1));
-  $('#plus').addEventListener('click', () => bump(0.1));
-  view.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => {
-    timing = b.dataset.t;
-    view.querySelectorAll('[data-t]').forEach((x) => x.classList.toggle('on', x === b));
+  view.querySelectorAll('[data-ctiming]').forEach((b) => b.addEventListener('click', () => {
+    chartTiming = b.dataset.ctiming;
+    renderRecords();
   }));
-  $('#save-weight').addEventListener('click', () => {
-    const v = round1(Number(input.value));
-    const date = $('#wdate').value || today();
-    if (!(v >= 10 && v <= 150)) {
-      toast('몸무게 숫자를 다시 확인해 주세요.');
-      return;
-    }
-    state.weights.push({ id: newId(), date, time: date === today() ? nowTime() : '', kg: v, timing });
-    persist();
-    toast('체중을 남겨 주셔서 고마워요! 💛');
-    location.hash = '#home';
-  });
   view.querySelectorAll('[data-del-weight]').forEach((b) => b.addEventListener('click', () => {
     const w = state.weights.find((x) => x.id === b.dataset.delWeight);
     if (w && confirm(`${w.kg}kg 기록을 지울까요?`)) {
       state.weights = state.weights.filter((x) => x.id !== w.id);
       persist();
-      renderWeight();
+      renderRecords();
     }
   }));
+  const byDate = new Map();
+  const sorted = [...state.weights].sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+  for (const w of sorted) if (w.timing === chartTiming) byDate.set(w.date, w.kg);
+  renderWeightChart($('#chart'), [...byDate].map(([date, kg]) => ({ date, kg })), state.settings.goalLow, state.settings.goalHigh);
 }
 
 // ───────── 설정 (보호자용) ─────────
 function renderSettings() {
   const s = state.settings;
-  const meta = getMeta();
-  const codes = [...new Set([...state.favorites, ...[...state.meals].reverse().map((m) => m.code)])].slice(0, 30);
-  const foods = codes.map(getFood).filter((f) => f && f.custom !== 'recipe' && isRecordable(f));
-  const recipes = state.customFoods.filter((c) => c.kind === 'recipe');
-  const labels = state.customFoods.filter((c) => c.kind === 'label');
-
   view.innerHTML = `
-    <header class="top"><h1>${emoji('⚙️')} 설정</h1><a class="settings-link" href="#home">닫기</a></header>
+    <h1>${emoji('⚙️')} 설정</h1>
     <p class="muted">보호자님이 정해 두시는 곳이에요.</p>
 
-    <section class="card">
-      <h2>목표 체중</h2>
+    <section class="card card-peach">
+      <h2>함께 자라는 친구</h2>
+      <div class="pet-pick small" role="radiogroup" aria-label="친구 바꾸기">
+        ${Object.entries(PETS).map(([k, name]) => `<button class="pet-option ${g().pet === k ? 'on' : ''}" role="radio" aria-checked="${g().pet === k}" data-pet="${k}">
+          ${petSvg({ kind: k, form: growNow().form, scale: 1, size: 90 })}<span>${name}</span></button>`).join('')}
+      </div>
+      <p class="small muted">친구를 바꿔도 자란 단계는 그대로예요.</p>
+    </section>
+
+    <section class="card card-butter">
+      <h2>하루에 먹을 횟수</h2>
+      ${stepper('set-meals', g().mealsPerDay, 1, '번', '하루 횟수')}
+    </section>
+
+    <section class="card card-mint">
+      <h2>몸무게</h2>
+      <p class="label">목표 몸무게</p>
       <div class="pair">
         <label><input id="goalLow" type="number" inputmode="decimal" step="0.5" value="${s.goalLow ?? ''}"> kg</label>
         <span>~</span>
         <label><input id="goalHigh" type="number" inputmode="decimal" step="0.5" value="${s.goalHigh ?? ''}"> kg</label>
       </div>
-      <p class="small muted">범위로 쓰거나 한 칸만 써도 돼요. 비워 두면 목표를 표시하지 않아요.</p>
-    </section>
-
-    <section class="card">
-      <h2>체중 측정 시점</h2>
-      <p class="small muted">체중 기록할 때 고르는 버튼이에요. 쉼표로 나눠 6개까지 쓸 수 있어요.</p>
+      <p class="small muted">친구는 앞의 값(${s.goalLow ?? '-'}kg)에 도착하면 마지막 모습이 돼요. 처음 몸무게: ${g().startKg ?? '-'}kg (${g().startDate ?? '-'})</p>
+      <p class="label">측정 시점 버튼</p>
       <input id="timings" class="text-input" type="text" value="${esc(s.timings.join(', '))}">
+      <p class="small muted">쉼표로 나눠 6개까지 쓸 수 있어요.</p>
+      <p class="label">친구를 키우는 몸무게</p>
+      <div class="chips" role="group" aria-label="성장에 쓰는 측정 시점">
+        ${s.timings.map((t) => `<button class="chip ${t === g().timing ? 'on' : ''}" data-gtiming="${esc(t)}">${esc(t)}</button>`).join('')}
+      </div>
+      <p class="small muted">이때 잰 몸무게로만 자라요. 바꾸면 그 시점 기록으로 다시 계산해요.</p>
     </section>
 
-    <section class="card">
-      <h2>칼륨 표시 기준</h2>
-      <p class="notice">⚠ 병원 기준으로 확인하세요. 아래 값은 기본값일 뿐이에요.</p>
-      <p class="small">기록하는 양(한 번에 드시는 양) 기준으로 나눠요.</p>
-      <label class="row">적음: <input id="kLow" type="number" inputmode="numeric" min="0" value="${s.kLow}"> mg 미만</label>
-      <label class="row">많음: <input id="kHigh" type="number" inputmode="numeric" min="0" value="${s.kHigh}"> mg 이상</label>
-      <p class="small muted">그 사이는 "보통", 칼륨 값이 없는 음식은 "칼륨 정보 없음"으로 보여요.</p>
+    <section class="card card-cream">
+      <h2>칼륨 주의 음식</h2>
+      <p class="notice">⚠ 병원 기준으로 확인하세요.</p>
+      <p class="small">여기 적은 이름이 들어간 음식을 적으면 부드럽게 알려 드려요. 기록은 막지 않아요.</p>
+      <textarea id="caution" class="text-input" rows="3" placeholder="쉼표로 나눠 적어 주세요">${esc(g().cautionWords.join(', '))}</textarea>
     </section>
     <button class="btn btn-primary" id="save-settings">설정 저장</button>
 
-    <section class="card">
-      <h2>직접 만든 음식</h2>
-      <p class="small muted">재료를 골라 1인분을 만들어 두면 한 번에 기록할 수 있어요. 영양 수치는 재료 수치를 더한 값이에요.</p>
-      ${recipes.length ? `<ul class="list">${recipes.map((r) => `<li>
-        <div class="li-main"><b>${esc(r.name)}</b><span>1인분 ${kcalText(r.kcal)}kcal · 단백질 ${gText(r.protein)}g · 재료 ${r.items.length}개</span>
-        ${potassiumBadge(r.potassium, r.potassiumPartial)}</div>
-        <a class="btn-text" href="#recipe?id=${encodeURIComponent(r.code)}">고치기</a></li>`).join('')}</ul>` : ''}
-      <a class="btn btn-secondary" href="#recipe?id=new">새 음식 만들기</a>
-    </section>
-
-    <section class="card">
-      <h2>직접 입력 음식 (제품 라벨)</h2>
-      <p class="small muted">포장지 영양성분표를 보고 칼로리·단백질·칼륨을 직접 넣어요. 출처는 "${SOURCE_LABEL}"로 표시돼요.</p>
-      ${labels.length ? `<ul class="list">${labels.map((c) => {
-        const f = getFood(c.code);
-        return `<li><div class="li-main"><b>${esc(c.name)}</b>
-          <span>${isRecordable(f) ? `${basisText(f)}당 ${kcalText(f.kcal)}kcal · 단백질 ${gText(f.protein)}g` : '<span class="tag">수치 입력 필요</span>'}</span></div>
-          <a class="btn-text" href="#label?id=${encodeURIComponent(c.code)}">고치기</a></li>`;
-      }).join('')}</ul>` : ''}
-      <a class="btn btn-secondary" href="#label?id=new">라벨 보고 등록하기</a>
-    </section>
-
-    <section class="card">
-      <h2>한 그릇 무게 · 개수 단위</h2>
-      <p class="small muted">한 그릇 무게나 "1개 = 50g" 같은 단위를 정해 두면 기록할 때 "1그릇", "2개"로 고를 수 있어요. 즐겨찾기와 최근 드신 음식이 여기에 나와요.</p>
-      ${foods.length ? `<ul class="serv-list">${foods.map((f) => {
-        const u = state.units[f.code];
-        return `<li data-food="${esc(f.code)}">
-        <span>${esc(f.name)}${f.rest ? ` <small>(${esc(f.rest)})</small>` : ''}</span>
-        <label>1${servingWord(f)} = <input type="number" inputmode="decimal" min="1" data-serv value="${state.servings[f.code] ?? ''}" placeholder="-"> ${f.unit}</label>
-        <label>단위 <input class="short" type="text" maxlength="5" data-unit-name value="${esc(u?.name ?? '')}" placeholder="개">
-          하나 = <input type="number" inputmode="decimal" min="1" data-unit-amount value="${u?.amount ?? ''}" placeholder="-"> ${f.unit}</label>
-      </li>`;
-      }).join('')}</ul>
-      <button class="btn btn-secondary" id="save-serv">무게·단위 저장</button>` : '<p class="muted">음식을 기록하거나 즐겨찾기하면 여기에 나와요.</p>'}
-    </section>
-
-    <section class="card">
+    <section class="card card-cream">
       <h2>백업</h2>
-      <p class="small muted">기록, 직접 만든 음식, 직접 입력 음식, 단위 설정은 이 폰의 브라우저에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우기 전에 내보내 두세요.</p>
+      <p class="small muted">기록은 이 폰의 브라우저에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우기 전에 내보내 두세요.</p>
       <button class="btn btn-secondary" id="export">전체 백업 내보내기</button>
       <button class="btn btn-secondary" id="export-settings">설정만 내보내기</button>
-      <p class="small muted">설정만 내보내기: 즐겨찾기, 직접 만든 음식, 직접 입력 음식, 개수 단위, 한 그릇 무게, 칼륨 기준값, 측정 시점, 목표 체중이 들어가고 식사·체중 기록은 빠져요.</p>
+      <p class="small muted">설정만 내보내기: 하루 횟수, 친구, 칼륨 주의 음식, 목표 몸무게, 측정 시점이 들어가고 음식·몸무게 기록은 빠져요.</p>
       <label class="btn btn-secondary file-btn">백업 불러오기<input id="import" type="file" accept="application/json,.json" hidden></label>
-      <p class="small muted">전체 백업을 불러오면 이 폰의 기록이 백업으로 바뀌어요. 설정 파일을 불러오면 기록은 그대로 두고 설정만 합쳐요(이미 있는 음식은 다시 추가하지 않아요).</p>
+      <p class="small muted">전체 백업을 불러오면 이 폰의 기록이 백업으로 바뀌어요. 설정 파일을 불러오면 기록은 그대로 두고 설정만 합쳐요.</p>
     </section>
 
-    <section class="card source">
-      <h2>음식 영양 정보 출처</h2>
-      ${meta ? `<p>${esc(meta.database)}<br>공공데이터포털 「${esc(meta.title)}」<br>제공: ${esc(meta.provider)}</p>
-      <p>데이터 기준일: <b>${esc(meta.baseDate)}</b><br>앱에 넣은 날: ${esc(meta.downloaded)}<br>음식 ${meta.count.toLocaleString('ko-KR')}개</p>
-      <p class="small muted">${esc(meta.url)}</p>` : '<p class="muted">불러오는 중…</p>'}
-      <p class="small muted">직접 입력 음식은 "${SOURCE_LABEL}", 직접 만든 음식은 재료 수치를 더한 값으로 표시돼요.</p>
-      <p class="small muted">이 앱은 식사와 체중 기록을 돕는 도구이며 의학적 조언을 하지 않아요. 식사와 관련된 결정은 담당 의료진과 상의해 주세요.</p>
+    <section class="card card-cream source">
+      <p class="small muted">이 앱은 식사와 몸무게 기록을 돕는 도구이며 의학적 조언을 하지 않아요. 식사와 관련된 결정은 담당 의료진과 상의해 주세요.</p>
     </section>`;
 
+  bindSteppers();
+  let pet = g().pet;
+  let growTiming = g().timing;
+  view.querySelectorAll('[data-pet]').forEach((b) => b.addEventListener('click', () => {
+    pet = b.dataset.pet;
+    view.querySelectorAll('[data-pet]').forEach((x) => {
+      x.classList.toggle('on', x === b);
+      x.setAttribute('aria-checked', String(x === b));
+    });
+  }));
+  view.querySelectorAll('[data-gtiming]').forEach((b) => b.addEventListener('click', () => {
+    growTiming = b.dataset.gtiming;
+    view.querySelectorAll('[data-gtiming]').forEach((x) => x.classList.toggle('on', x === b));
+  }));
   $('#save-settings').addEventListener('click', () => {
-    const n = (id) => Number($(id).value);
-    let next;
+    let next, mealsPerDay, cautionWords, timings;
     try {
-      next = {
-        ...parseGoal($('#goalLow').value, $('#goalHigh').value),
-        timings: parseTimings($('#timings').value),
-        kLow: n('#kLow'), kHigh: n('#kHigh'),
-      };
+      next = parseGoal($('#goalLow').value, $('#goalHigh').value);
+      timings = parseTimings($('#timings').value);
+      mealsPerDay = parseMealsPerDay($('#set-meals').value);
+      cautionWords = parseCautionWords($('#caution').value);
     } catch (err) {
       return toast(err.message);
     }
-    if (!(next.kLow >= 0 && next.kHigh > next.kLow)) return toast('칼륨 기준: "많음" 값이 "적음" 값보다 커야 해요.');
-    state.settings = { ...state.settings, ...next };
+    if (next.goalLow === null) return toast('목표 몸무게를 적어 주세요.');
+    if (!timings.includes(growTiming)) growTiming = timings[0];
+    state.settings = { ...state.settings, ...next, timings };
+    state.grow = { ...g(), pet, mealsPerDay, cautionWords, timing: growTiming };
     persist();
     toast('설정을 저장했어요.');
+    renderSettings();
   });
-  $('#save-serv')?.addEventListener('click', () => {
-    const servings = { ...state.servings };
-    const units = { ...state.units };
-    try {
-      view.querySelectorAll('[data-food]').forEach((li) => {
-        const code = li.dataset.food;
-        const v = Number($('[data-serv]', li).value);
-        if (v > 0) servings[code] = v;
-        else delete servings[code];
-        const u = parseCountUnit($('[data-unit-name]', li).value, $('[data-unit-amount]', li).value);
-        if (u) units[code] = u;
-        else delete units[code];
-      });
-    } catch (err) {
-      return toast(err.message);
-    }
-    state.servings = servings;
-    state.units = units;
-    persist();
-    toast('무게와 단위를 저장했어요.');
-  });
+
   const download = (text, filename) => {
     const blob = new Blob([text], { type: 'application/json' });
     const a = document.createElement('a');
@@ -916,74 +516,51 @@ function renderSettings() {
   };
   $('#export').addEventListener('click', () => download(exportJson(state), `식사기록-백업-${today()}.json`));
   $('#export-settings').addEventListener('click', () => download(exportSettingsJson(state), `식사기록-설정-${today()}.json`));
-  $('#import').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    try {
-      const r = readBackupFile(await file.text(), state);
-      if (r.kind === 'settings') {
-        const { added, skipped, favoritesAdded } = r.report;
-        const lines = [
-          '설정 파일이에요. 식사·체중 기록은 그대로 두고 설정만 합칠까요?',
-          `· 새로 추가할 음식 ${added.length}개${added.length ? `: ${added.join(', ')}` : ''}`,
-          `· 이미 있어서 건너뛸 음식 ${skipped.length}개${skipped.length ? `: ${skipped.join(', ')}` : ''}`,
-          `· 즐겨찾기 ${favoritesAdded}개 추가`,
-          '· 목표 체중, 칼륨 기준값, 측정 시점, 개수 단위, 한 그릇 무게는 파일의 값으로 바뀌어요.',
-        ];
-        if (!confirm(lines.join('\n'))) return;
-        state = r.state;
-        setCustomFoods(state.customFoods);
-        persist();
-        toast(`설정을 합쳤어요. 음식 ${added.length}개 추가, ${skipped.length}개는 이미 있어요.`);
-        renderSettings();
-        return;
-      }
+  $('#import').addEventListener('change', importFromInput);
+}
+
+// 백업 불러오기 (설정 화면과 처음 시작 화면에서 함께 쓴다)
+async function importFromInput(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const r = readBackupFile(await file.text(), state);
+    if (r.kind === 'settings') {
+      if (!confirm('설정 파일이에요. 음식·몸무게 기록은 그대로 두고 설정만 합칠까요?\n· 하루 횟수, 목표 몸무게, 측정 시점은 파일의 값으로 바뀌어요.\n· 칼륨 주의 음식은 없던 것만 더해요.')) return;
+      state = r.state;
+    } else {
       const next = r.state;
-      if (!confirm(`전체 백업이에요. 식사 ${next.meals.length}건, 체중 ${next.weights.length}건, 직접 등록한 음식 ${next.customFoods.length}개를 불러올까요?\n지금 폰에 있는 기록은 이 백업으로 바뀌어요.`)) return;
+      if (!confirm(`전체 백업이에요. 몸무게 ${next.weights.length}건, 적은 음식 ${next.grow.notes.length}건을 불러올까요?\n지금 폰에 있는 기록은 이 백업으로 바뀌어요.`)) return;
       state = next;
-      setCustomFoods(state.customFoods);
-      persist();
-      toast('백업을 불러왔어요.');
-      renderSettings();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      e.target.value = '';
     }
-  });
+    persist();
+    startDraft = null;
+    startStep = 1;
+    toast('불러왔어요.');
+    route();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    e.target.value = '';
+  }
 }
 
 // ───────── 화면 전환 ─────────
-const routes = {
-  home: renderHome, meal: renderMeal, weight: renderWeight, settings: renderSettings,
-  recipe: renderRecipe, label: renderLabel,
-};
-const NEEDS_FOODS = ['meal', 'settings', 'recipe'];
+const routes = { start: renderStart, today: renderToday, records: renderRecords, settings: renderSettings };
 
 function route() {
-  const [name, query] = location.hash.slice(1).split('?');
-  const key = routes[name] ? name : 'home';
-  view.removeEventListener('click', onMealClick);
-  closeSheet();
-  const params = new URLSearchParams(query || '');
-  if (key === 'meal' && params.has('q')) lastQuery = params.get('q');
-  routes[key](params);
+  let key = location.hash.slice(1).split('?')[0];
+  if (!g().started) key = 'start';           // 친구를 만나기 전에는 처음 시작 화면
+  else if (!routes[key] || key === 'start') key = 'today';
+  if (key !== 'start') document.body.classList.remove('onboarding');
+  if (key !== 'today') { weightEditing = false; cautionNote = ''; }
+  routes[key]();
   document.querySelectorAll('.tabbar a').forEach((a) => a.classList.toggle('on', a.getAttribute('href') === `#${key}`));
   window.scrollTo(0, 0);
-  if (key === 'meal' && params.has('food') && foodsReady) openAmountSheet(params.get('food'));
 }
 
 window.addEventListener('hashchange', route);
-window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
 route();
-
-loadFoods().then(() => {
-  foodsReady = true;
-  const name = location.hash.slice(1).split('?')[0];
-  if (NEEDS_FOODS.includes(name)) route();
-}).catch(() => {
-  toast('음식 정보를 불러오지 못했어요. 다시 열어 주세요.');
-});
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js');

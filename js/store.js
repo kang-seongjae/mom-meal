@@ -1,5 +1,6 @@
 // 기록은 이 폰의 브라우저(localStorage)에만 저장한다.
 import { DEFAULT_SETTINGS, validateBackup, validateSettingsBackup, normalizeMeal } from './calc.js';
+import { defaultGrow, validateGrow, parseMealsPerDay } from './grow.js';
 
 const KEY = 'momMeal.v1';
 
@@ -15,6 +16,7 @@ function empty() {
     units: {},       // 음식 코드 -> 개수 단위 {name: '개', amount: 50}
     customFoods: [], // 직접 만든 음식(kind 'recipe'), 제품 라벨을 보고 직접 입력한 음식(kind 'label')
     settings: { ...DEFAULT_SETTINGS },
+    grow: defaultGrow(), // 캐릭터 키우기 (친구, 하루 횟수, 시작 몸무게, 오늘 먹은 음식, 주의 음식)
   };
 }
 
@@ -27,6 +29,7 @@ export function load() {
       ...empty(), ...s,
       meals: (s.meals || []).map(normalizeMeal),
       settings: { ...DEFAULT_SETTINGS, ...(s.settings || {}) },
+      grow: { ...defaultGrow(), ...(s.grow || {}) },
     };
   } catch {
     return empty();
@@ -57,6 +60,8 @@ export function exportSettingsJson(state) {
     units: state.units,
     servings: state.servings,
     settings: { goalLow, goalHigh, kLow, kHigh, timings },
+    // 키우기 설정 (시작 몸무게와 음식 기록은 넣지 않는다)
+    growSettings: (({ mealsPerDay, pet, cautionWords }) => ({ mealsPerDay, pet, cautionWords }))(state.grow || defaultGrow()),
     exportedAt: new Date().toISOString(),
   }, null, 1);
 }
@@ -74,6 +79,7 @@ export function readBackupFile(text, state) {
   const obj = parseFile(text);
   if (obj && obj.kind === 'settings') {
     validateSettingsBackup(obj);
+    validateGrowSettings(obj.growSettings);
     return { kind: 'settings', ...mergeSettings(state, obj) };
   }
   return { kind: 'full', state: importJson(text) };
@@ -119,10 +125,20 @@ export function mergeSettings(state, obj) {
 
   // 목표 체중·칼륨 기준값·측정 시점은 값이 하나뿐이라 가져온 값으로 바꾼다.
   const { goalLow, goalHigh, kLow, kHigh, timings } = obj.settings;
+  // 키우기: 하루 횟수·친구는 파일 값으로, 주의 음식은 합친다 (같은 이름은 한 번만)
+  const grow = { ...(state.grow || defaultGrow()) };
+  const gs = obj.growSettings;
+  if (gs) {
+    if (gs.mealsPerDay !== undefined) grow.mealsPerDay = gs.mealsPerDay;
+    if (gs.pet && !grow.pet) grow.pet = gs.pet;
+    const words = [...(grow.cautionWords || [])];
+    for (const w of gs.cautionWords || []) if (!words.some((x) => sameName(x, w))) words.push(w);
+    grow.cautionWords = words;
+  }
   return {
     state: {
       ...state,
-      favorites, customFoods, units, servings,
+      favorites, customFoods, units, servings, grow,
       settings: { ...state.settings, goalLow, goalHigh, kLow, kHigh, timings },
     },
     report: {
@@ -137,6 +153,7 @@ export function mergeSettings(state, obj) {
 export function importJson(text) {
   const obj = parseFile(text);
   validateBackup(obj);
+  validateGrow(obj.grow);
   const s = empty();
   return {
     ...s,
@@ -147,5 +164,13 @@ export function importJson(text) {
     units: obj.units || {},
     customFoods: obj.customFoods || [],
     settings: { ...DEFAULT_SETTINGS, ...(obj.settings || {}) },
+    grow: { ...defaultGrow(), ...(obj.grow || {}) },
   };
+}
+
+function validateGrowSettings(gs) {
+  if (gs === undefined) return;
+  if (typeof gs !== 'object' || gs === null) throw new Error('키우기 설정 형식이 맞지 않아요.');
+  if (gs.mealsPerDay !== undefined) parseMealsPerDay(gs.mealsPerDay);
+  validateGrow({ pet: gs.pet, cautionWords: gs.cautionWords });
 }

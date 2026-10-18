@@ -6,6 +6,7 @@
 <iframe id="app" width="390" height="844"></iframe>
 <script type="module">
 // 실제 앱을 틀 안에 띄워 버튼을 눌러 보고, 저장된 기록과 화면 글자를 확인한다.
+// 몸무게·음식은 동작 확인용 가상의 예시 값이다.
 const results = [];
 const frame = document.getElementById('app');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -15,7 +16,7 @@ async function waitFor(fn, ms = 8000) {
     try { const v = fn(); if (v) return v; } catch {}
     await sleep(50);
   }
-  throw new Error('시간 초과');
+  throw new Error('시간 초과: ' + fn.toString().replace(/\s+/g, ' ').slice(0, 90));
 }
 async function test(name, fn) {
   document.getElementById('out').textContent = results.map((r) => r.join(' | ')).join('\n') + `\n진행 중: ${name}`;
@@ -24,332 +25,209 @@ async function test(name, fn) {
 const doc = () => frame.contentDocument;
 const text = () => doc().body.innerText;
 const stored = () => JSON.parse(localStorage.getItem('momMeal.v1') || '{}');
+const $ = (sel) => doc().querySelector(sel);
 let loads = 0;
 async function open(hash) {
   const before = frame.contentDocument;
   frame.src = `../index.html?load=${++loads}#${hash}`; // 해시만 바꾸면 새로 열리지 않으므로 매번 다시 연다
-  await waitFor(() => doc() !== before && doc().readyState === 'complete' && doc().querySelector('#view').children.length);
+  await waitFor(() => doc() !== before && doc().readyState === 'complete' && $('#view').children.length);
 }
-
-localStorage.clear();
-
-await test('식사 기록: 양(150g) 고르고 기록하면 저장되고 오늘 합계에 반영', async () => {
-  await open('meal?food=D102-053000000-0001'); // 가래떡 100g당 195kcal, 단백질 3.92g, 칼륨 23mg
-  const btn = await waitFor(() => [...doc().querySelectorAll('.amount')].find((b) => b.textContent.includes('150g')));
-  btn.click();
-  await waitFor(() => doc().querySelector('.result-box').textContent.includes('293')); // 195*1.5=292.5
-  doc().querySelector('#save-meal').click();
-  const m = await waitFor(() => stored().meals?.[0]);
-  if (m.amount !== 150 || m.per.kcal !== 195 || m.per.potassium !== 23 || m.basis !== 100) throw new Error(JSON.stringify(m));
-  await open('home');
-  await waitFor(() => text().includes('293') && text().includes('5.9')); // 3.92*1.5=5.88
-});
-
-await test('칼륨 정보 없는 음식: 화면에 "칼륨 정보 없음", 저장값은 null', async () => {
-  await open('meal?food=D202-120000000-4493');
-  await waitFor(() => doc().querySelector('.knote.k-unknown')?.textContent.includes('칼륨 정보 없음'));
-  doc().querySelector('#save-meal').click();
-  await waitFor(() => stored().meals?.length === 2);
-  if (stored().meals[1].per.potassium !== null) throw new Error('null 이 아님');
-  await open('meal');
-  await waitFor(() => [...doc().querySelectorAll('.kbadge')].some((b) => b.textContent === '칼륨 정보 없음'));
-});
-
-await test('칼륨 많은 음식: 부드러운 안내가 나오고 기록은 막지 않음', async () => {
-  await open('meal?food=D711-508000000-0001'); // 감자조림 100ml당 칼륨 429mg
-  await waitFor(() => doc().querySelector('.knote.k-high')?.textContent.includes('기록은 그대로'));
-  doc().querySelector('#save-meal').click();
-  await waitFor(() => stored().meals?.length === 3);
-});
-
-await test('한 그릇 무게 설정: 250 으로 정하면 "1 그릇 (250)" 버튼이 생김', async () => {
-  await open('meal?food=D704-212000000-0001'); // 흰죽
-  await waitFor(() => doc().querySelector('#serving'));
-  doc().querySelector('#serving').value = '250';
-  doc().querySelector('#apply-fine').click();
-  await waitFor(() => [...doc().querySelectorAll('.amount')].some((b) => b.textContent.includes('1 그릇') && /250(g|ml)/.test(b.textContent)));
-  if (stored().servings['D704-212000000-0001'] !== 250) throw new Error('저장 안 됨');
-});
-
-await test('즐겨찾기: 추가하면 식사 화면 위에 버튼이 생김', async () => {
-  await open('meal?food=D704-212000000-0001');
-  (await waitFor(() => doc().querySelector('#fav'))).click();
-  await open('meal');
-  await waitFor(() => [...doc().querySelectorAll('.fav-name')].some((b) => b.textContent === '흰죽'));
-});
-
-await test('체중 기록: 목표를 입력하기 전에는 설정 안내가 나온다', async () => {
-  await open('weight');
-  if (doc().querySelector('#kg').value !== '') throw new Error('기본 체중이 채워져 있음');
-  doc().querySelector('#kg').value = '52.4';
-  [...doc().querySelectorAll('.chip')].find((b) => b.textContent === '저녁').click();
-  doc().querySelector('#save-weight').click();
-  const w = await waitFor(() => stored().weights?.[0]);
-  if (w.kg !== 52.4 || w.timing !== '저녁') throw new Error(JSON.stringify(w));
-  await waitFor(() => doc().querySelector('.goal-line a[href="#settings"]'));
-});
-
-await test('설정: 목표 체중(빈칸 시작)과 측정 시점을 입력하면 홈과 체중 화면에 반영', async () => {
-  await open('settings');
-  const low = await waitFor(() => doc().querySelector('#goalLow'));
-  if (low.value !== '' || doc().querySelector('#goalHigh').value !== '') throw new Error('목표 기본값이 있음');
-  low.value = '55';
-  doc().querySelector('#goalHigh').value = '57';
-  doc().querySelector('#timings').value = '아침, 저녁, 운동 후';
-  doc().querySelector('#save-settings').click();
-  await waitFor(() => stored().settings?.goalLow === 55 && stored().settings.goalHigh === 57);
-  await open('home');
-  await waitFor(() => text().includes('목표 55~57kg까지') && text().includes('2.6kg'));
-  await open('weight');
-  await waitFor(() => [...doc().querySelectorAll('.chip')].map((b) => b.textContent).join('|') === '아침|저녁|운동 후');
-});
-
-await test('검색: "죽" 을 치면 결과가 나온다', async () => {
-  await open('meal');
-  const q = await waitFor(() => doc().querySelector('#q'));
-  q.value = '죽';
-  q.dispatchEvent(new Event('input'));
-  await waitFor(() => doc().querySelectorAll('.result').length > 5);
-});
-
-// ───── 개수 단위 · 직접 입력 음식 · 직접 만든 음식 ─────
-// 라벨 수치(400kcal 등)는 화면 동작 확인용 가상 값이다.
-const EGG = 'D327-758010000-0001';   // 달걀_삶은것 100g당 150kcal
-const RICE = 'D301-022000000-0001';  // 쌀밥 100g당 166kcal
 function setVal(sel, v) {
-  const el = doc().querySelector(sel);
+  const el = $(sel);
   el.value = v;
   el.dispatchEvent(new Event('input'));
 }
+const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+async function writeFood(name) {
+  setVal('#note', name);
+  $('#note-form').requestSubmit();
+  await waitFor(() => stored().grow.notes.some((n) => n.name === name && n.date === todayStr));
+}
+async function saveWeight(kg, timing = '아침') {
+  if ($('#w-again')) $('#w-again').click();
+  await waitFor(() => $('#w-kg'));
+  setVal('#w-kg', String(kg));
+  [...doc().querySelectorAll('[data-wtiming]')].find((b) => b.textContent === timing).click();
+  const n = stored().weights.length;
+  $('#w-save').click();
+  await waitFor(() => stored().weights.length === n + 1);
+}
+const levelText = () => $('.pet-level').textContent;
 
-await test('개수 단위: 삶은 달걀 "1개 = 50g" 설정 → "2개" 골라 기록', async () => {
-  await open(`meal?food=${EGG}`);
-  await waitFor(() => doc().querySelector('#unit-name'));
-  doc().querySelector('#unit-name').value = '개';
-  doc().querySelector('#unit-amount').value = '50';
-  doc().querySelector('#apply-fine').click();
-  const two = await waitFor(() => [...doc().querySelectorAll('.amount')].find((b) => b.textContent.includes('2개') && b.textContent.includes('100g')));
-  two.click();
-  await waitFor(() => doc().querySelector('.result-box').textContent.includes('150 kcal'));
-  const before = stored().meals.length;
-  doc().querySelector('#save-meal').click();
-  const m = await waitFor(() => stored().meals.length === before + 1 && stored().meals.at(-1));
-  if (m.amount !== 100 || m.amountLabel !== '2개') throw new Error(JSON.stringify(m));
-  if (JSON.stringify(stored().units[EGG]) !== '{"name":"개","amount":50}') throw new Error('단위 저장 안 됨');
-  await open('meal');
-  await waitFor(() => text().includes('2개 (100g)'));
+// 예전 화면(키우기 전)을 쓰던 폰: 몸무게 기록, 목표, 예전 형식의 식사 기록이 있다
+const legacyWeights = [
+  { id: 'old1', date: daysAgo(5), time: '08:00', kg: 52.4, timing: '아침' },
+  { id: 'old2', date: daysAgo(2), time: '20:00', kg: 53.5, timing: '저녁' },
+  { id: 'old3', date: daysAgo(1), time: '08:00', kg: 52.8, timing: '아침' },
+];
+localStorage.clear();
+localStorage.setItem('momMeal.v1', JSON.stringify({
+  app: 'mom-meal', version: 1, favorites: [], servings: {}, units: {}, customFoods: [],
+  weights: legacyWeights,
+  meals: [{ id: 'm1', date: daysAgo(1), time: '08:00', code: 'D102-053000000-0001', name: '가래떡', rest: '', unit: 'g',
+    amount: 100, per100: { kcal: 195, protein: 3.92, potassium: 23 } }],
+  settings: { goalLow: 56, goalHigh: 57, kLow: 100, kHigh: 200, timings: ['아침', '저녁', '기타'] },
+}));
+
+await test('처음 시작: 예전 기록이 있으면 몸무게·목표를 이어받고, 친구가 태어난다', async () => {
+  await open('today');
+  await waitFor(() => text().includes('하루에 몇 번 드실까요'));
+  if (doc().querySelectorAll('.slot').length !== 4) throw new Error('기본 4칸이 아님');
+  if (getComputedStyle($('.tabbar')).display !== 'none') throw new Error('처음 시작에는 메뉴를 숨김');
+  doc().querySelector('[data-step="s-meals"][data-d="1"]').click();
+  await waitFor(() => doc().querySelectorAll('.slot').length === 5);
+  doc().querySelector('[data-step="s-meals"][data-d="-1"]').click();
+  await waitFor(() => doc().querySelectorAll('.slot').length === 4);
+  $('#s-next').click();
+  await waitFor(() => text().includes('함께 자랄 친구'));
+  if (!$('#s-next').disabled) throw new Error('친구를 고르기 전에 다음으로 넘어감');
+  if (doc().querySelectorAll('.pet-option').length !== 4) throw new Error('친구가 넷이 아님');
+  $('[data-pet="bear"]').click();
+  await waitFor(() => $('[data-pet="bear"]').classList.contains('on'));
+  $('#s-next').click();
+  await waitFor(() => $('#s-kg'));
+  if ($('#s-kg').value !== '52.8' || $('#s-goal').value !== '56') throw new Error(`이어받기: ${$('#s-kg').value}, ${$('#s-goal').value}`);
+  setVal('#s-kg', '53');
+  $('#s-done').click();
+  await waitFor(() => stored().grow?.started);
+  const s = stored();
+  const g = s.grow;
+  if (g.pet !== 'bear' || g.mealsPerDay !== 4 || g.startKg !== 53 || g.timing !== '아침' || g.startDate !== todayStr) throw new Error(JSON.stringify(g));
+  for (const w of legacyWeights) if (!s.weights.some((x) => JSON.stringify(x) === JSON.stringify(w))) throw new Error('예전 몸무게 기록이 바뀜');
+  if (s.weights.length !== legacyWeights.length + 1) throw new Error('오늘 몸무게가 하나 더해져야 함');
+  if (s.meals.length !== 1) throw new Error('예전 식사 기록이 사라짐');
+  await waitFor(() => !$('#celebrate').hidden && $('#celebrate').textContent.includes('태어났어요'));
+  await waitFor(() => $('.pet-stage svg')?.getAttribute('aria-label').startsWith('곰'));
+  if (frame.contentWindow.location.hash !== '#today') throw new Error(frame.contentWindow.location.hash);
 });
 
-let labelCode;
-await test('직접 입력 음식: 수치를 비워 둔 채 등록 → 즐겨찾기에 추가, 기록은 막히고 안내', async () => {
-  await open('label?id=new');
-  setVal('#l-name', '영양음료(테스트)');
-  doc().querySelector('#l-save').click();
-  const c = await waitFor(() => stored().customFoods?.find((x) => x.kind === 'label'));
-  labelCode = c.code;
-  for (const k of ['basis', 'kcal', 'protein', 'potassium']) if (c[k] !== null) throw new Error(`${k} 값이 ${c[k]}`);
-  if (!stored().favorites.includes(labelCode)) throw new Error('즐겨찾기 안 됨');
-  await waitFor(() => [...doc().querySelectorAll('.tag')].some((t) => t.textContent === '수치 입력 필요'));
-  await open(`meal?food=${labelCode}`);
-  const btn = await waitFor(() => doc().querySelector('#save-meal'));
-  if (!btn.disabled) throw new Error('기록 버튼이 눌림');
-  if (!doc().querySelector('.result-box').textContent.includes('아직 입력하지 않았어요')) throw new Error('안내 없음');
+await test('음식 적기: 적을 때마다 칸이 채워지고, 다 채우면 친구가 기뻐하며 칭찬', async () => {
+  await open('today');
+  await writeFood('흰죽');
+  await waitFor(() => doc().querySelectorAll('.slot.on').length === 1);
+  if (!$('#toast').textContent.includes('잘 드셨어요')) throw new Error($('#toast').textContent);
+  // 자주 먹은 음식 버튼으로 다시 적기
+  (await waitFor(() => $('[data-quick="흰죽"]'))).click();
+  await waitFor(() => doc().querySelectorAll('.slot.on').length === 2);
+  await writeFood('삶은 달걀');
+  if ($('.pet-happy')) throw new Error('다 채우기 전에 기뻐함');
+  await writeFood('두유');
+  await waitFor(() => doc().querySelectorAll('.slot.on').length === 4);
+  await waitFor(() => !$('#celebrate').hidden && $('#celebrate').textContent.includes('4번 다 드셨어요'));
+  await waitFor(() => $('.pet-stage .pet-happy') && text().includes('다 드셨네요'));
+  await writeFood('카스텔라');
+  await waitFor(() => $('.slot-extra')?.textContent === '+1');
+  if (doc().querySelectorAll('.list li').length !== 5) throw new Error('오늘 목록');
 });
 
-await test('직접 입력 음식: 라벨 수치를 채우면 "1팩"으로 기록, 출처 "직접 입력(제품 라벨)"', async () => {
-  await open(`label?id=${labelCode}`);
-  setVal('#l-basis', '200');
-  doc().querySelector('[data-unit="ml"]').click();
-  setVal('#l-kcal', '400');
-  setVal('#l-protein', '14');
-  setVal('#l-unitname', '팩');
-  doc().querySelector('#l-save').click();
-  await waitFor(() => stored().customFoods.find((x) => x.code === labelCode).basis === 200);
-  await open(`meal?food=${labelCode}`);
-  await waitFor(() => doc().querySelector('.amount.on')?.textContent.includes('1팩'));
-  const box = doc().querySelector('.result-box').textContent;
-  if (!box.includes('400 kcal') || !box.includes('칼륨 정보 없음')) throw new Error(box);
-  if (!doc().querySelector('#sheet').textContent.includes('직접 입력(제품 라벨)')) throw new Error('출처 표시 없음');
-  doc().querySelector('#save-meal').click();
-  const m = await waitFor(() => stored().meals.find((x) => x.code === labelCode));
-  if (m.amount !== 200 || m.basis !== 200 || m.per.kcal !== 400 || m.per.potassium !== null || m.source !== '직접 입력(제품 라벨)') {
-    throw new Error(JSON.stringify(m));
-  }
-  await open('meal');
-  await waitFor(() => [...doc().querySelectorAll('.fav-name')].some((b) => b.textContent === '영양음료(테스트)'));
+await test('음식 지우기: 지우면 칸도 줄어든다', async () => {
+  await open('today');
+  frame.contentWindow.confirm = () => true;
+  const btn = [...doc().querySelectorAll('[data-del-note]')].at(-1);
+  btn.click();
+  await waitFor(() => stored().grow.notes.filter((n) => n.date === todayStr).length === 4);
 });
 
-let oilCode;
-await test('직접 입력 음식: 자료에 없는 재료(칼륨 값 없음)도 등록', async () => {
-  await open('label?id=new');
-  setVal('#l-name', '참기름(테스트)');
-  setVal('#l-basis', '100');
-  doc().querySelector('[data-unit="g"]').click();
-  setVal('#l-kcal', '900');
-  setVal('#l-protein', '0');
-  doc().querySelector('#l-fav').checked = false;
-  doc().querySelector('#l-save').click();
-  const c = await waitFor(() => stored().customFoods.find((x) => x.name === '참기름(테스트)'));
-  oilCode = c.code;
-  if (c.potassium !== null || stored().favorites.includes(oilCode)) throw new Error(JSON.stringify(c));
+await test('칼륨 주의: 설정에 적은 이름이 들어간 음식을 적으면 부드럽게 알리고, 기록은 그대로', async () => {
+  await open('settings');
+  (await waitFor(() => $('#caution'))).value = '바나나, 토마토';
+  $('#save-settings').click();
+  await waitFor(() => stored().grow.cautionWords.join('|') === '바나나|토마토');
+  await open('today');
+  await writeFood('바나나 우유');
+  const note = await waitFor(() => $('.knote'));
+  if (!note.textContent.includes('칼륨 주의 음식') || !note.textContent.includes('기록은 그대로')) throw new Error(note.textContent);
+  if (![...doc().querySelectorAll('.kbadge')].some((b) => b.textContent === '칼륨 주의')) throw new Error('목록 표시 없음');
 });
 
-await test('직접 만든 음식: 재료 3개로 1인분 저장 → 즐겨찾기 → 기록, "칼륨 일부 정보 없음"', async () => {
-  await open('recipe?id=new');
-  async function addIng(q, code, amount) {
-    const input = await waitFor(() => doc().querySelector('#ing-q'));
-    input.value = q;
-    input.dispatchEvent(new Event('input'));
-    (await waitFor(() => doc().querySelector(`[data-ing="${code}"]`))).click();
-    await waitFor(() => doc().querySelector('#ing-amount'));
-    if (amount != null) setVal('#ing-amount', String(amount));
-    doc().querySelector('#ing-add').click();
-    await waitFor(() => doc().querySelector('#ing-q'));
-  }
-  await addIng('쌀밥', RICE, 210);
-  await addIng('달걀_삶은것', EGG, null);  // 개수 단위가 있어 "1개(50g)"가 기본
-  await addIng('참기름', oilCode, 5);
-  setVal('#r-name', '계란밥(테스트)');
-  await waitFor(() => text().includes('칼륨 일부 정보 없음'));
-  doc().querySelector('#r-save').click();
-  const r = await waitFor(() => stored().customFoods.find((x) => x.kind === 'recipe'));
-  const expectKcal = 166 * 2.1 + 150 * 0.5 + 900 * 0.05;
-  if (r.name !== '계란밥(테스트)' || r.items.length !== 3 || Math.abs(r.kcal - expectKcal) > 1e-6 || !r.potassiumPartial) {
-    throw new Error(JSON.stringify(r));
-  }
-  const egg = r.items.find((it) => it.code === EGG);
-  if (egg.amount !== 50 || egg.amountLabel !== '1개') throw new Error(JSON.stringify(egg));
-  if (!stored().favorites.includes(r.code)) throw new Error('즐겨찾기 안 됨');
-
-  await open('meal');
-  (await waitFor(() => [...doc().querySelectorAll('.fav-name')].find((b) => b.textContent === '계란밥(테스트)'))).click();
-  await waitFor(() => doc().querySelector('.amount.on')?.textContent.includes('1인분'));
-  const box = doc().querySelector('.result-box').textContent;
-  if (!box.includes(`${Math.round(expectKcal)} kcal`) || !box.includes('칼륨 일부 정보 없음')) throw new Error(box);
-  doc().querySelector('#save-meal').click();
-  const m = await waitFor(() => stored().meals.find((x) => x.code === r.code));
-  if (m.amount !== 1 || m.basis !== 1 || !m.per.potassiumPartial) throw new Error(JSON.stringify(m));
-  await open('meal');
-  await waitFor(() => [...doc().querySelectorAll('.kbadge')].some((b) => b.textContent === '칼륨 일부 정보 없음'));
+await test('성장: 0.5kg 늘면 한 단계 자라고, 줄어도 작아지지 않으며 응원만 한다', async () => {
+  await open('today');
+  await waitFor(() => levelText().startsWith('0/6단계'));  // 처음 53kg, 목표 56kg → 6단계
+  await saveWeight(53.5);
+  await waitFor(() => !$('#celebrate').hidden && $('#celebrate').textContent.includes('쑥 자랐어요'));
+  await waitFor(() => levelText().startsWith('1/6단계'));
+  await saveWeight(53.1);
+  await waitFor(() => $('#toast').textContent.includes('괜찮아요'));
+  await waitFor(() => levelText().startsWith('1/6단계') && $('.pet-stage .pet-cheer') && text().includes('그대로 자라 있어요'));
 });
 
-await test('라벨 수치를 고치면 그 재료로 만든 음식도 다시 계산', async () => {
-  await open(`label?id=${oilCode}`);
-  setVal('#l-kcal', '800');
-  doc().querySelector('#l-save').click();
-  const expectKcal = 166 * 2.1 + 150 * 0.5 + 800 * 0.05;
-  await waitFor(() => Math.abs(stored().customFoods.find((x) => x.kind === 'recipe').kcal - expectKcal) < 1e-6);
+await test('성장: 다른 측정 시점 몸무게로는 자라지 않는다', async () => {
+  await open('today');
+  await saveWeight(55.5, '저녁');
+  await sleep(200);
+  if (!levelText().startsWith('1/6단계')) throw new Error(levelText());
 });
 
-await test('이전 버전에서 저장된 기록(per100)도 그대로 열리고 합계가 맞다', async () => {
-  const today = new Date();
-  const d = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  localStorage.setItem('momMeal.v1', JSON.stringify({
-    app: 'mom-meal', version: 1, weights: [], favorites: [], servings: {}, settings: {},
-    meals: [{ id: 'old1', date: d, time: '08:00', code: 'D102-053000000-0001', name: '가래떡', rest: '', unit: 'g',
-      amount: 200, per100: { kcal: 195, protein: 3.92, potassium: 23 } }],
-  }));
-  await open('home');
-  await waitFor(() => text().includes('390') && text().includes('7.8'));  // 195×2, 3.92×2
-  await open('meal');
-  await waitFor(() => text().includes('200g · 390kcal'));
+await test('성장: 목표 몸무게에 도착하면 마지막 모습(꽃왕관)', async () => {
+  await open('today');
+  await saveWeight(56);
+  await waitFor(() => !$('#celebrate').hidden && $('#celebrate').textContent.includes('목표에 도착했어요'));
+  await waitFor(() => levelText().startsWith('6/6단계') && $('.pet-name').textContent.includes('꽃왕관'));
 });
 
-await test('설정만 내보내기 → 다른 폰에서 불러오기: 기록은 그대로, 설정만 합치고 두 번 불러와도 중복 없음', async () => {
-  const label = { code: 'my-e2e-label', kind: 'label', name: '라벨 음식(테스트)', basis: 200, unit: 'ml', kcal: 400, protein: 14, potassium: null };
-  const recipe = { code: 'my-e2e-recipe', kind: 'recipe', name: '만든 음식(테스트)',
-    items: [{ code: label.code, name: label.name, unit: 'ml', basis: 200, amount: 100, per: { kcal: 400, protein: 14, potassium: null } }],
-    kcal: 200, protein: 7, potassium: null, potassiumPartial: false };
-  const base = { app: 'mom-meal', version: 1, servings: {} };
-  // 폰 A: 설정을 만들어 둔 폰
-  localStorage.setItem('momMeal.v1', JSON.stringify({ ...base,
-    meals: [{ id: 'a1', date: '2026-10-01', amount: 1, basis: 1, code: recipe.code, name: recipe.name, unit: '인분', per: { kcal: 200, protein: 7, potassium: null } }],
-    weights: [{ id: 'aw', date: '2026-10-01', kg: 52, timing: '아침' }],
-    favorites: [label.code, recipe.code], customFoods: [label, recipe],
-    units: { [EGG]: { name: '개', amount: 50 } }, servings: { [RICE]: 210 },
-    settings: { goalLow: 55, goalHigh: 57, kLow: 120, kHigh: 250, timings: ['아침', '저녁', '운동 후'] } }));
+await test('기록 화면: 예전 몸무게도 그래프에 이어지고, 잘못 적은 몸무게를 지우면 단계도 돌아간다', async () => {
+  await open('records');
+  await waitFor(() => $('#chart svg'));
+  const dots = doc().querySelectorAll('#chart .dot').length;
+  if (dots < 3) throw new Error(`아침 몸무게 점 ${dots}개`);
+  if (!text().includes('가래떡')) throw new Error('예전 식사 기록 이름이 안 보임');
+  frame.contentWindow.confirm = () => true;
+  const w56 = stored().weights.find((w) => w.kg === 56);
+  $(`[data-del-weight="${w56.id}"]`).click();
+  await waitFor(() => !stored().weights.some((w) => w.kg === 56));
+  await open('today');
+  await waitFor(() => levelText().startsWith('1/6단계'));
+});
+
+await test('백업: 전체 백업에는 키우기 기록이, 설정만 내보내기에는 설정만 들어간다', async () => {
   await open('settings');
   const w = frame.contentWindow;
-  let saved = null;
-  w.HTMLAnchorElement.prototype.click = function () { saved = { name: this.download, href: this.href }; };
-  (await waitFor(() => doc().querySelector('#export-settings'))).click();
-  await waitFor(() => saved);
-  if (!saved.name.startsWith('식사기록-설정-')) throw new Error(saved.name);
-  const fileText = await (await w.fetch(saved.href)).text();
-  const out = JSON.parse(fileText);
-  if ('meals' in out || 'weights' in out || out.customFoods.length !== 2) throw new Error('내보낸 내용이 이상함');
-
-  // 폰 B: 자기 기록이 있는 폰
-  const bMeal = { id: 'b1', date: '2026-10-02', amount: 100, basis: 100, code: RICE, name: '쌀밥', unit: 'g', per: { kcal: 166, protein: 3.36, potassium: 26 } };
-  const bWeight = { id: 'bw', date: '2026-10-02', kg: 60, timing: '저녁' };
-  localStorage.setItem('momMeal.v1', JSON.stringify({ ...base, meals: [bMeal], weights: [bWeight], favorites: [RICE],
-    customFoods: [], units: {}, settings: { goalLow: null, goalHigh: null, kLow: 100, kHigh: 200, timings: ['아침', '기타'] } }));
-  async function importFile() {
-    await open('settings');
-    const win = frame.contentWindow;
-    let asked = '';
-    win.confirm = (msg) => { asked = msg; return true; };
-    const input = await waitFor(() => doc().querySelector('#import'));
-    const dt = new win.DataTransfer();
-    dt.items.add(new win.File([fileText], 'settings.json', { type: 'application/json' }));
-    input.files = dt.files;
-    input.dispatchEvent(new win.Event('change'));
-    await waitFor(() => asked);
-    return asked;
-  }
-  const asked1 = await importFile();
-  if (!asked1.includes('설정만 합칠까요') || !asked1.includes('새로 추가할 음식 2개')) throw new Error(asked1);
-  await waitFor(() => stored().customFoods.length === 2);
-  let s = stored();
-  if (JSON.stringify(s.meals) !== JSON.stringify([bMeal]) || JSON.stringify(s.weights) !== JSON.stringify([bWeight])) throw new Error('기록이 바뀜');
-  if (s.favorites.join('|') !== [RICE, label.code, recipe.code].join('|')) throw new Error(s.favorites.join('|'));
-  if (s.units[EGG]?.amount !== 50 || s.servings[RICE] !== 210) throw new Error('단위·무게 안 합쳐짐');
-  if (s.settings.goalLow !== 55 || s.settings.kHigh !== 250 || s.settings.timings.join('|') !== '아침|저녁|운동 후') throw new Error(JSON.stringify(s.settings));
-
-  // 같은 파일을 한 번 더 불러와도 늘어나지 않는다
-  const asked2 = await importFile();
-  if (!asked2.includes('새로 추가할 음식 0개') || !asked2.includes('이미 있어서 건너뛸 음식 2개')) throw new Error(asked2);
-  await waitFor(() => doc().querySelector('#toast') && !doc().querySelector('#toast').hidden);
-  s = stored();
-  if (s.customFoods.length !== 2 || s.favorites.length !== 3 || s.meals.length !== 1) throw new Error(JSON.stringify(s));
-  await open('meal');
-  await waitFor(() => [...doc().querySelectorAll('.fav-name')].map((b) => b.textContent).join('|') === '쌀밥|라벨 음식(테스트)|만든 음식(테스트)');
+  const saved = [];
+  w.HTMLAnchorElement.prototype.click = function () { saved.push({ name: this.download, href: this.href }); };
+  (await waitFor(() => $('#export'))).click();
+  $('#export-settings').click();
+  await waitFor(() => saved.length === 2);
+  const full = JSON.parse(await (await w.fetch(saved[0].href)).text());
+  const sett = JSON.parse(await (await w.fetch(saved[1].href)).text());
+  if (full.grow.pet !== 'bear' || full.grow.notes.length !== 5 || full.weights.length < 5) throw new Error('전체 백업 내용');
+  if ('meals' in sett || 'weights' in sett || JSON.stringify(sett).includes('흰죽') || 'startKg' in sett.growSettings) throw new Error('설정 파일에 기록이 들어감');
+  if (sett.growSettings.cautionWords.join('|') !== '바나나|토마토') throw new Error(JSON.stringify(sett.growSettings));
+  window.__full = JSON.stringify(full);
+  window.__sett = JSON.stringify(sett);
 });
 
-await test('홈 진행 막대·즐겨찾기 이모지·기록 축하 문구', async () => {
-  localStorage.setItem('momMeal.v1', JSON.stringify({
-    app: 'mom-meal', version: 1, meals: [], servings: {}, units: {}, customFoods: [],
-    favorites: [RICE, EGG],
-    weights: [{ id: 'w1', date: '2026-10-01', time: '08:00', kg: 52, timing: '아침' },
-      { id: 'w2', date: '2026-10-10', time: '08:00', kg: 53, timing: '아침' }],
-    settings: { goalLow: 55, goalHigh: 57, kLow: 100, kHigh: 200, timings: ['아침', '저녁', '기타'] },
-  }));
-  await open('home');
-  const bar = await waitFor(() => doc().querySelector('.progress[role="progressbar"]'));
-  if (bar.getAttribute('aria-valuenow') !== '33' || !text().includes('33%')) throw new Error(bar.outerHTML);
-  if (!text().includes('목표 55~57kg까지') || !text().includes('2kg')) throw new Error('남은 양 표시 없음');
-  // 순서: 체중 카드 → 오늘 드신 양 → (기록 버튼) → 그래프
-  const order = [...doc().querySelectorAll('.card')].map((c) => c.className);
-  if (order.join('|') !== 'card card-peach|card card-butter|card card-sky') throw new Error(order.join('|'));
-  await open('meal');
-  const favs = await waitFor(() => doc().querySelectorAll('.fav').length === 2 && [...doc().querySelectorAll('.fav')]);
-  const icons = favs.map((b) => b.querySelector('.fav-emoji').textContent).join('');
-  if (icons !== '🍚🥚') throw new Error(icons);
-  favs[0].click();
-  await waitFor(() => doc().querySelector('#save-meal'));
-  doc().querySelector('#save-meal').click();
-  const c = await waitFor(() => !doc().querySelector('#celebrate').hidden && doc().querySelector('#celebrate'));
-  if (!/잘 드셨어요|맛있게 드셨네요|잘하셨어요|힘내셨어요/.test(c.textContent)) throw new Error(c.textContent);
-  if (c.getAttribute('role') !== 'status') throw new Error('화면 읽기 프로그램 안내 없음');
-  if (stored().meals.length !== 1) throw new Error('기록 안 됨');
+async function importFile(textContent, route = 'settings', inputSel = '#import') {
+  await open(route);
+  const win = frame.contentWindow;
+  let asked = '';
+  win.confirm = (msg) => { asked = msg; return true; };
+  const input = await waitFor(() => $(inputSel));
+  const dt = new win.DataTransfer();
+  dt.items.add(new win.File([textContent], 'backup.json', { type: 'application/json' }));
+  input.files = dt.files;
+  input.dispatchEvent(new win.Event('change'));
+  await waitFor(() => asked);
+  return asked;
+}
 
-  // 음식이 지정된 주소(#meal?food=…)로 열어 기록해도 창이 다시 열리지 않는다
-  await open(`meal?food=${EGG}`);
-  (await waitFor(() => doc().querySelector('#save-meal'))).click();
-  await waitFor(() => stored().meals.length === 2);
-  await sleep(300);
-  if (!doc().querySelector('#sheet').hidden) throw new Error('기록 뒤에 창이 다시 열림');
-  if (frame.contentWindow.location.hash !== '#meal') throw new Error(frame.contentWindow.location.hash);
+await test('백업 불러오기: 새 폰의 처음 시작 화면에서 전체 백업을 불러오면 친구와 기록이 그대로 이어진다', async () => {
+  localStorage.clear();
+  const asked = await importFile(window.__full, 'today', '#import-start');
+  if (!asked.includes('전체 백업')) throw new Error(asked);
+  await waitFor(() => stored().grow?.started && stored().grow.notes.length === 5);
+  await open('today');
+  await waitFor(() => $('.pet-stage svg')?.getAttribute('aria-label').startsWith('곰') && levelText().startsWith('1/6단계'));
+});
+
+await test('설정 파일 불러오기: 기록은 그대로 두고 주의 음식만 합친다', async () => {
+  const s = stored();
+  s.grow.cautionWords = ['키위'];
+  localStorage.setItem('momMeal.v1', JSON.stringify(s));
+  const asked = await importFile(window.__sett);
+  if (!asked.includes('설정만 합칠까요')) throw new Error(asked);
+  await waitFor(() => stored().grow.cautionWords.join('|') === '키위|바나나|토마토');
+  if (stored().grow.notes.length !== 5 || stored().weights.length !== s.weights.length) throw new Error('기록이 바뀜');
 });
 
 // 오프라인 동작은 tools/run_tests.py 가 서버를 끈 뒤 다시 열어서 확인한다.
