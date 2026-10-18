@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>오프라인 준비</title></head>
+<body>
+<!-- 오프라인 테스트용: 앱을 열어 서비스 워커를 설치하게 하고, 늦게 오는 그림으로 몇 초 동안 페이지 load 를 늦춰
+     헤드리스 브라우저가 설치를 끝내기 전에 닫히지 않게 한다 -->
+<iframe src="../index.html#today" width="390" height="400"></iframe>
+<img src="/__slow?ms=8000" alt="">
+</body>
+</html>

@@ -80,18 +80,19 @@ def readability_check():
 
 def offline_check():
     """한 번 열어 서비스 워커가 파일을 저장하게 한 뒤, 서버를 끄고 같은 브라우저로 다시 열어 본다."""
+    print("== 오프라인 (서버를 끈 뒤 다시 열기)")
     srv, base = start_server()
     with tempfile.TemporaryDirectory() as prof:
-        # 서비스 워커가 파일 저장을 끝낼 시간을 주려고 인터넷이 될 때 두 번 연다
-        for _ in range(2):
-            run_browser(["--virtual-time-budget=30000", "--dump-dom", f"{base}/index.html#today"], prof)
+        # 테스트 서버는 Cache-Control: no-store 라서, 오프라인으로 열리면 서비스 워커가 저장한 파일 덕분이다.
+        # sw-warmup.html 은 늦게 오는 그림으로 몇 초를 실제로 기다려 서비스 워커 설치가 끝나게 한다.
+        run_browser(["--dump-dom", f"{base}/tests/sw-warmup.html"], prof)
         srv.shutdown()
         srv.server_close()
-        r = run_browser(["--virtual-time-budget=30000", "--dump-dom", f"{base}/index.html#today"], prof)
+        r = run_browser(["--dump-dom", f"{base}/index.html#today"], prof)
     dom = r.stdout.decode("utf-8", "replace")
     # 처음 여는 브라우저라 '처음 시작' 화면과 하루 횟수 칸이 떠야 한다
     ok = "하루에 몇 번 드실까요" in dom and 'class="slot"' in dom
-    print(f"== 오프라인 (서버를 끈 뒤 다시 열기)\n{'PASS' if ok else 'FAIL'} | 처음 시작 화면이 열림\n")
+    print(f"{'PASS' if ok else 'FAIL'} | 서버 없이 처음 시작 화면이 열림\n")
     return ok
 
 
