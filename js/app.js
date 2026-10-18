@@ -4,7 +4,7 @@ import {
 import { load, save, newId, exportJson, exportSettingsJson, readBackupFile } from './store.js';
 import { renderWeightChart } from './chart.js';
 import {
-  PETS, FORMS, growState, todayProgress, frequentFoods, rewards, recordStreak,
+  PETS, FORMS, DEFAULT_NAMES, petName, parsePetName, withJosa, callName, growState, todayProgress, frequentFoods, rewards, recordStreak,
   parseCautionWords, cautionMatches, parseFoodName, parseMealsPerDay,
 } from './grow.js';
 import { petSvg } from './pet.js';
@@ -43,7 +43,7 @@ function toast(msg) {
 function celebrate(title, sub = '', form = null) {
   const gs = growNow();
   const c = $('#celebrate');
-  c.innerHTML = `${petSvg({ kind: g().pet, form: form ?? gs.form, scale: 1, mood: 'happy', size: 150 })}
+  c.innerHTML = `${petSvg({ kind: g().pet, form: form ?? gs.form, scale: 1, mood: 'happy', size: 150, name: petName(g()) })}
     <span class="celebrate-title">${esc(title)}</span>${sub ? `<span class="celebrate-sub">${esc(sub)}</span>` : ''}`;
   c.hidden = false;
   c.classList.remove('pop');
@@ -95,13 +95,14 @@ function renderStart() {
     startDraft = {
       mealsPerDay: g().mealsPerDay || 4,
       pet: g().pet,
+      name: g().name || '',
       kg: last ? last.kg : '',
       timing: last && state.settings.timings.includes(last.timing) ? last.timing : state.settings.timings[0],
       goal: state.settings.goalLow ?? '',
     };
   }
   const d = startDraft;
-  const dots = [1, 2, 3].map((i) => `<span class="dot ${i === startStep ? 'on' : ''}" aria-hidden="true"></span>`).join('');
+  const dots = [1, 2, 3, 4].map((i) => `<span class="dot ${i === startStep ? 'on' : ''}" aria-hidden="true"></span>`).join('');
   let body;
   if (startStep === 1) {
     body = `
@@ -123,6 +124,18 @@ function renderStart() {
       </div>
       <button class="btn btn-primary" id="s-next" ${d.pet ? '' : 'disabled'}>다음</button>
       <button class="btn btn-secondary" id="s-back">이전</button>`;
+  } else if (startStep === 3) {
+    const def = DEFAULT_NAMES[d.pet];
+    body = `
+      <h1>${emoji('🏷️')} 이름을 지어 주세요</h1>
+      <p class="lead">${esc(PETS[d.pet])} 친구를 뭐라고 부를까요?</p>
+      <section class="card card-peach name-card">
+        <div class="pet-stage">${petSvg({ kind: d.pet, form: 0, scale: 1, size: 150, name: d.name || def })}</div>
+        <label class="field">친구 이름<input id="s-name" class="text-input" maxlength="8" value="${esc(d.name)}" placeholder="${esc(def)}" autocomplete="off"></label>
+        <p class="small muted">비워 두면 "${esc(callName(def))}"라고 불러요. 나중에 설정에서 바꿀 수 있어요.</p>
+      </section>
+      <button class="btn btn-primary" id="s-next">다음</button>
+      <button class="btn btn-secondary" id="s-back">이전</button>`;
   } else {
     body = `
       <h1>${emoji('⚖️')} 몸무게를 알려 주세요</h1>
@@ -143,7 +156,7 @@ function renderStart() {
       <button class="btn btn-primary" id="s-done">친구 만나기</button>
       <button class="btn btn-secondary" id="s-back">이전</button>`;
   }
-  view.innerHTML = `<div class="start-dots" aria-label="${startStep} / 3 단계">${dots}</div>${body}`;
+  view.innerHTML = `<div class="start-dots" aria-label="${startStep} / 4 단계">${dots}</div>${body}`;
   bindSteppers();
 
   const meals = $('#s-meals');
@@ -162,6 +175,7 @@ function renderStart() {
     d.timing = b.dataset.timing;
     view.querySelectorAll('[data-timing]').forEach((x) => x.classList.toggle('on', x === b));
   }));
+  $('#s-name')?.addEventListener('input', (e) => { d.name = e.target.value; });
   $('#s-kg')?.addEventListener('input', (e) => { d.kg = e.target.value; });
   $('#s-goal')?.addEventListener('input', (e) => { d.goal = e.target.value; });
   $('#s-back')?.addEventListener('click', () => { startStep -= 1; renderStart(); });
@@ -171,6 +185,9 @@ function renderStart() {
       try { d.mealsPerDay = parseMealsPerDay(meals.value); } catch (err) { return toast(err.message); }
     }
     if (startStep === 2 && !d.pet) return toast('친구를 하나 골라 주세요.');
+    if (startStep === 3) {
+      try { d.name = parsePetName($('#s-name').value); } catch (err) { return toast(err.message); }
+    }
     startStep += 1;
     renderStart();
   });
@@ -191,7 +208,7 @@ function renderStart() {
     }
     state.settings = { ...state.settings, ...goal };
     state.grow = {
-      ...g(), started: true, pet: d.pet, mealsPerDay: Number(d.mealsPerDay), timing: d.timing,
+      ...g(), started: true, pet: d.pet, name: d.name, mealsPerDay: Number(d.mealsPerDay), timing: d.timing,
       startKg: kg, startDate: today(),
     };
     persist();
@@ -200,19 +217,20 @@ function renderStart() {
     document.body.classList.remove('onboarding');
     history.replaceState(null, '', '#today');  // 이미 #today 로 열려 있어도 화면이 바뀌도록 직접 그린다
     route();
-    celebrate(`${PETS[d.pet]} 친구가 태어났어요!`, '앞으로 잘 부탁해요', 0);
+    celebrate(`${withJosa(petName(g()), '가')} 태어났어요!`, '앞으로 잘 부탁해요', 0);
   });
 }
 
 // ───────── 오늘 (첫 화면) ─────────
 function petMessage(gs, prog) {
-  if (gs.final) return '목표에 도착했어요! 함께해 주셔서 정말 고마워요.';
+  const nm = petName(g());
+  if (gs.final) return `목표에 도착했어요! ${withJosa(nm, '도')} 꽃왕관을 썼어요. 정말 고마워요.`;
   if (gs.dropped && latestGrowWeight()?.date === today()) {
-    return '조금 줄었어도 괜찮아요. 저는 그대로 자라 있어요. 내일 또 같이 해요!';
+    return `조금 줄었어도 괜찮아요. ${withJosa(nm, '는')} 그대로 자라 있어요. 내일 또 같이 해요!`;
   }
-  if (prog.done) return `오늘 ${prog.goal}번 다 드셨네요! 정말 최고예요!`;
-  if (prog.count === 0) return '오늘 첫 끼니를 기다리고 있어요. 천천히 드셔도 괜찮아요.';
-  return `${prog.count}번 드셨어요! ${prog.goal - prog.count}번 더 같이 해요.`;
+  if (prog.done) return `${withJosa(nm, '가')} 배불러서 기뻐해요! 오늘 ${prog.goal}번 다 드셨어요.`;
+  if (prog.count === 0) return `${withJosa(nm, '가')} 첫 끼니를 기다리고 있어요. 천천히 드셔도 괜찮아요.`;
+  return `${prog.count}번 드셨어요! ${withJosa(nm, '랑')} ${prog.goal - prog.count}번 더 같이 해요.`;
 }
 
 function latestGrowWeight() {
@@ -244,8 +262,8 @@ function renderToday() {
 
     <section class="card card-peach pet-card">
       <p class="bubble">${esc(petMessage(gs, prog))}</p>
-      <div class="pet-stage">${petSvg({ kind: g().pet, form: gs.form, scale: gs.scale, mood, size: 200, crop: true })}</div>
-      <p class="pet-name">${esc(PETS[g().pet])} · ${FORMS[gs.form]} 모습</p>
+      <div class="pet-stage">${petSvg({ kind: g().pet, form: gs.form, scale: gs.scale, mood, size: 200, crop: true, name: petName(g()) })}</div>
+      <p class="pet-name"><b class="pet-call">${esc(petName(g()))}</b> · ${esc(PETS[g().pet])} · ${FORMS[gs.form]} 모습</p>
       <p class="pet-level">${gs.level}/${gs.total}단계${growLine ? ` · ${growLine}` : ''}</p>
     </section>
 
@@ -322,7 +340,7 @@ function addNote(text) {
     : '';
   renderToday();
   if (!before.done && after.done) {
-    celebrate(`오늘 ${after.goal}번 다 드셨어요!`, '정말 잘하셨어요. 친구도 신났어요!');
+    celebrate(`${withJosa(petName(g()), '가')} 배불러서 기뻐해요!`, `오늘 ${after.goal}번 다 드셨어요. 정말 잘하셨어요!`);
   } else {
     toast(`잘 드셨어요! (${Math.min(after.count, after.goal)}/${after.goal})`);
   }
@@ -338,11 +356,11 @@ function saveWeight(value, timing) {
   const after = growNow();
   renderToday();
   if (after.final && !before.final) {
-    celebrate('목표에 도착했어요!', '친구가 마지막 모습이 됐어요. 정말 고마워요!');
+    celebrate('목표에 도착했어요!', `${withJosa(petName(g()), '가')} 꽃왕관을 썼어요. 정말 고마워요!`);
   } else if (after.level > before.level) {
-    celebrate('친구가 쑥 자랐어요!', `${after.level}단계 · ${FORMS[after.form]} 모습`);
+    celebrate(`${withJosa(petName(g()), '가')} 쑥 자랐어요!`, `${after.level}단계 · ${FORMS[after.form]} 모습`);
   } else if (timing === g().timing && after.dropped) {
-    toast('괜찮아요, 내일 또 같이 해요 💛');
+    toast(`괜찮아요, ${withJosa(petName(g()), '랑')} 내일 또 같이 해요 💛`);
   } else {
     toast('몸무게를 적어 주셔서 고마워요!');
   }
@@ -425,6 +443,8 @@ function renderSettings() {
           ${petSvg({ kind: k, form: growNow().form, scale: 1, size: 90 })}<span>${name}</span></button>`).join('')}
       </div>
       <p class="small muted">친구를 바꿔도 자란 단계는 그대로예요.</p>
+      <label class="field">친구 이름<input id="set-name" class="text-input" maxlength="8" value="${esc(g().name || '')}" placeholder="${esc(DEFAULT_NAMES[g().pet] ?? '')}" autocomplete="off"></label>
+      <p class="small muted">비워 두면 기본 이름(토끼 몽실, 병아리 보리, 곰 도토리, 고양이 나비)으로 불러요.</p>
     </section>
 
     <section class="card card-butter">
@@ -478,6 +498,7 @@ function renderSettings() {
   let growTiming = g().timing;
   view.querySelectorAll('[data-pet]').forEach((b) => b.addEventListener('click', () => {
     pet = b.dataset.pet;
+    $('#set-name').placeholder = DEFAULT_NAMES[pet];
     view.querySelectorAll('[data-pet]').forEach((x) => {
       x.classList.toggle('on', x === b);
       x.setAttribute('aria-checked', String(x === b));
@@ -488,8 +509,9 @@ function renderSettings() {
     view.querySelectorAll('[data-gtiming]').forEach((x) => x.classList.toggle('on', x === b));
   }));
   $('#save-settings').addEventListener('click', () => {
-    let next, mealsPerDay, cautionWords, timings;
+    let next, mealsPerDay, cautionWords, timings, name;
     try {
+      name = parsePetName($('#set-name').value);
       next = parseGoal($('#goalLow').value, $('#goalHigh').value);
       timings = parseTimings($('#timings').value);
       mealsPerDay = parseMealsPerDay($('#set-meals').value);
@@ -500,7 +522,7 @@ function renderSettings() {
     if (next.goalLow === null) return toast('목표 몸무게를 적어 주세요.');
     if (!timings.includes(growTiming)) growTiming = timings[0];
     state.settings = { ...state.settings, ...next, timings };
-    state.grow = { ...g(), pet, mealsPerDay, cautionWords, timing: growTiming };
+    state.grow = { ...g(), pet, name, mealsPerDay, cautionWords, timing: growTiming };
     persist();
     toast('설정을 저장했어요.');
     renderSettings();

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><title>계산 테스트</title></head>
+<head><meta charset="utf-8"><title>계산 테스트</title><link rel="stylesheet" href="../app.css"></head>
 <body>
 <pre id="out">실행 중…</pre>
 <script type="module">
@@ -553,6 +553,41 @@ await test('친구 그림: 네 친구 × 다섯 모습이 모두 그려지고, �
   eq(/viewBox="0 0 200 200"/.test(petSvg({ kind: 'cat', scale: 1, crop: true })), true, '다 자라면 자르지 않음');
   eq(/viewBox="0 7[0-9] 200/.test(petSvg({ kind: 'cat', scale: 0.62, crop: true })), true, '작을 때 위쪽 빈 곳을 자름');
 });
+await test('친구 이름: 비우면 동물별 기본 이름, 지어 준 이름은 그대로', () => {
+  eq(G.petName({ pet: 'bunny', name: '' }), '몽실'); eq(G.petName({ pet: 'chick' }), '보리');
+  eq(G.petName({ pet: 'bear', name: '  ' }), '도토리'); eq(G.petName({ pet: 'cat', name: '콩이' }), '콩이');
+  eq(G.petName({ pet: null }), '친구');
+  eq(G.parsePetName('  봄  이 '), '봄 이'); eq(G.parsePetName(''), '');
+  let threw = 0;
+  for (const t of ['아홉글자짜리이름이', '<b>', 'a"b']) { try { G.parsePetName(t); } catch { threw++; } }
+  eq(threw, 3);
+});
+await test('친구 이름 조사: 받침이 있으면 "○○이가", 없으면 "○○가"', () => {
+  eq(G.withJosa('몽실', '가'), '몽실이가'); eq(G.withJosa('몽실', '는'), '몽실이는'); eq(G.withJosa('몽실', '랑'), '몽실이랑');
+  eq(G.withJosa('나비', '가'), '나비가'); eq(G.withJosa('도토리', '도'), '도토리도'); eq(G.withJosa('보리', '랑'), '보리랑');
+  eq(G.withJosa('콩이', '가'), '콩이가', '이름이 이미 "이"로 끝나도 자연스럽게');
+  eq(G.withJosa('Coco', '가'), 'Coco(이)가', '한글이 아니면 둘 다 적음');
+  eq(G.callName('몽실'), '몽실이'); eq(G.callName('나비'), '나비');
+});
+await test('친구 그림: 이름표에 이름이 들어가고, 기본·기뻐함·응원 표정이 서로 다르다', () => {
+  eq(petSvg({ kind: 'bear', name: '도토리' }).includes('aria-label="도토리(곰), 아기 모습"'), true);
+  const normal = petSvg({ kind: 'cat' }), happy = petSvg({ kind: 'cat', mood: 'happy' }), cheer = petSvg({ kind: 'cat', mood: 'cheer' });
+  const eye = 'class="pet-eye"';
+  eq(normal.includes(eye) && !normal.includes('pet-brows'), true, '기본: 동그란 눈(깜빡임), 눈썹 없음');
+  eq(!happy.includes(eye) && happy.includes('Q76 88'), true, '기쁨: ^^ 눈');
+  eq(cheer.includes('pet-brows') && cheer.includes(eye), true, '응원: 힘준 눈썹 + 동그란 눈');
+  eq(new Set([normal, happy, cheer].map((x) => x.replace(/pet-(normal|happy|cheer)/, ''))).size, 3);
+});
+await test('움직임: 숨쉬기·깜빡임이 있고, "동작 줄이기"를 켜면 멈추는 규칙이 있다', () => {
+  let rules = [];
+  for (const sh of document.styleSheets) { try { rules.push(...sh.cssRules); } catch {} }
+  const text = rules.map((r) => r.cssText).join('\n');
+  eq(/\.pet-normal \.pet-move \{[^}]*pet-breathe/.test(text), true, '숨쉬기');
+  eq(/\.pet \.pet-eye \{[^}]*pet-blink/.test(text), true, '눈 깜빡임');
+  const reduce = rules.filter((r) => r.media && /prefers-reduced-motion: reduce/.test(r.conditionText || r.media.mediaText));
+  eq(reduce.some((m) => [...m.cssRules].some((r) => /\.pet \.pet-move/.test(r.selectorText) && /\.pet-eye/.test(r.selectorText)
+    && r.style.animationName === 'none')), true, '동작 줄이기에서 멈춤');
+});
 await test('백업: 키우기 정보(친구·음식 기록·시작 몸무게)가 전체 백업에 들어가고 그대로 불러와짐', () => {
   const grow = { ...baseGrow, cautionWords: ['바나나'], notes: [{ id: 'n1', date: '2026-10-18', time: '08:00', name: '흰죽' }] };
   const st = { app: 'mom-meal', version: 1, meals: [], weights: [W('2026-10-18', 30.5)], favorites: [], servings: {}, units: {},
@@ -570,19 +605,21 @@ await test('백업: 키우기 정보 형식이 틀리면 거부', () => {
   const base = { app: 'mom-meal', meals: [], weights: [], favorites: [] };
   let threw = 0;
   for (const bad of [{ grow: [] }, { grow: { pet: 'dragon' } }, { grow: { mealsPerDay: 0 } }, { grow: { startKg: -1 } },
-    { grow: { notes: [{ date: 1 }] } }, { grow: { cautionWords: 'x' } }]) {
+    { grow: { notes: [{ date: 1 }] } }, { grow: { cautionWords: 'x' } }, { grow: { name: 3 } }, { grow: { name: '아홉글자짜리이름이' } }]) {
     try { importJson(JSON.stringify({ ...base, ...bad })); } catch { threw++; }
   }
-  eq(threw, 6);
+  eq(threw, 8);
 });
 await test('설정만 내보내기: 하루 횟수·친구·주의 음식은 담고, 시작 몸무게·음식 기록은 빼고, 불러오면 주의 음식을 합침', () => {
-  const a = { ...phoneA(), grow: { ...baseGrow, mealsPerDay: 5, pet: 'cat', cautionWords: ['바나나', '키위'], notes: [{ date: '2026-10-18', name: '흰죽' }] } };
+  const a = { ...phoneA(), grow: { ...baseGrow, mealsPerDay: 5, pet: 'cat', name: '콩이', cautionWords: ['바나나', '키위'], notes: [{ date: '2026-10-18', name: '흰죽' }] } };
   const out = JSON.parse(exportSettingsJson(a));
-  eq(JSON.stringify(out.growSettings), JSON.stringify({ mealsPerDay: 5, pet: 'cat', cautionWords: ['바나나', '키위'] }));
+  eq(JSON.stringify(out.growSettings), JSON.stringify({ mealsPerDay: 5, pet: 'cat', name: '콩이', cautionWords: ['바나나', '키위'] }));
   eq(JSON.stringify(out).includes('흰죽'), false); eq('startKg' in out.growSettings, false);
   const b = { ...phoneB(), grow: { ...G.defaultGrow(), started: true, pet: 'bear', mealsPerDay: 4, cautionWords: ['키위 ', '토마토'], notes: [{ date: '2026-10-18', name: '두유' }] } };
   const r = readBackupFile(JSON.stringify(out), b);
   eq(r.state.grow.mealsPerDay, 5); eq(r.state.grow.pet, 'bear', '이미 고른 친구는 그대로');
+  eq(r.state.grow.name, '콩이', '이름이 없던 폰에는 이름이 들어감');
+  eq(readBackupFile(JSON.stringify(out), { ...b, grow: { ...b.grow, name: '봄이' } }).state.grow.name, '봄이', '이미 지은 이름은 그대로');
   eq(r.state.grow.cautionWords.join('|'), '키위 |토마토|바나나', '없던 것만 더함');
   eq(r.state.grow.notes.length, 1, '음식 기록은 그대로');
 });

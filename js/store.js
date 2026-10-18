@@ -61,7 +61,7 @@ export function exportSettingsJson(state) {
     servings: state.servings,
     settings: { goalLow, goalHigh, kLow, kHigh, timings },
     // 키우기 설정 (시작 몸무게와 음식 기록은 넣지 않는다)
-    growSettings: (({ mealsPerDay, pet, cautionWords }) => ({ mealsPerDay, pet, cautionWords }))(state.grow || defaultGrow()),
+    growSettings: (({ mealsPerDay, pet, name, cautionWords }) => ({ mealsPerDay, pet, name, cautionWords }))(state.grow || defaultGrow()),
     exportedAt: new Date().toISOString(),
   }, null, 1);
 }
@@ -131,6 +131,7 @@ export function mergeSettings(state, obj) {
   if (gs) {
     if (gs.mealsPerDay !== undefined) grow.mealsPerDay = gs.mealsPerDay;
     if (gs.pet && !grow.pet) grow.pet = gs.pet;
+    if (gs.name && !grow.name) grow.name = gs.name;   // 이미 지어 준 이름은 그대로
     const words = [...(grow.cautionWords || [])];
     for (const w of gs.cautionWords || []) if (!words.some((x) => sameName(x, w))) words.push(w);
     grow.cautionWords = words;
@@ -172,5 +173,5 @@ function validateGrowSettings(gs) {
   if (gs === undefined) return;
   if (typeof gs !== 'object' || gs === null) throw new Error('키우기 설정 형식이 맞지 않아요.');
   if (gs.mealsPerDay !== undefined) parseMealsPerDay(gs.mealsPerDay);
-  validateGrow({ pet: gs.pet, cautionWords: gs.cautionWords });
+  validateGrow({ pet: gs.pet, name: gs.name, cautionWords: gs.cautionWords });
 }

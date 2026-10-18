@@ -86,6 +86,10 @@ await test('처음 시작: 예전 기록이 있으면 몸무게·목표를 이�
   $('[data-pet="bear"]').click();
   await waitFor(() => $('[data-pet="bear"]').classList.contains('on'));
   $('#s-next').click();
+  const nameInput = await waitFor(() => $('#s-name'));
+  if (nameInput.placeholder !== '도토리' || !text().includes('이름을 지어 주세요')) throw new Error('이름 단계: ' + nameInput.placeholder);
+  setVal('#s-name', '콩이');
+  $('#s-next').click();
   await waitFor(() => $('#s-kg'));
   if ($('#s-kg').value !== '52.8' || $('#s-goal').value !== '56') throw new Error(`이어받기: ${$('#s-kg').value}, ${$('#s-goal').value}`);
   setVal('#s-kg', '53');
@@ -93,12 +97,12 @@ await test('처음 시작: 예전 기록이 있으면 몸무게·목표를 이�
   await waitFor(() => stored().grow?.started);
   const s = stored();
   const g = s.grow;
-  if (g.pet !== 'bear' || g.mealsPerDay !== 4 || g.startKg !== 53 || g.timing !== '아침' || g.startDate !== todayStr) throw new Error(JSON.stringify(g));
+  if (g.pet !== 'bear' || g.name !== '콩이' || g.mealsPerDay !== 4 || g.startKg !== 53 || g.timing !== '아침' || g.startDate !== todayStr) throw new Error(JSON.stringify(g));
   for (const w of legacyWeights) if (!s.weights.some((x) => JSON.stringify(x) === JSON.stringify(w))) throw new Error('예전 몸무게 기록이 바뀜');
   if (s.weights.length !== legacyWeights.length + 1) throw new Error('오늘 몸무게가 하나 더해져야 함');
   if (s.meals.length !== 1) throw new Error('예전 식사 기록이 사라짐');
-  await waitFor(() => !$('#celebrate').hidden && $('#celebrate').textContent.includes('태어났어요'));
-  await waitFor(() => $('.pet-stage svg')?.getAttribute('aria-label').startsWith('곰'));
+  await waitFor(() => !$('#celebrate').hidden && $('#celebrate').textContent.includes('콩이가 태어났어요'));
+  await waitFor(() => $('.pet-stage svg')?.getAttribute('aria-label').startsWith('콩이(곰)') && $('.pet-call')?.textContent === '콩이');
   if (frame.contentWindow.location.hash !== '#today') throw new Error(frame.contentWindow.location.hash);
 });
 
@@ -114,8 +118,8 @@ await test('음식 적기: 적을 때마다 칸이 채워지고, 다 채우면 �
   if ($('.pet-happy')) throw new Error('다 채우기 전에 기뻐함');
   await writeFood('두유');
   await waitFor(() => doc().querySelectorAll('.slot.on').length === 4);
-  await waitFor(() => !$('#celebrate').hidden && $('#celebrate').textContent.includes('4번 다 드셨어요'));
-  await waitFor(() => $('.pet-stage .pet-happy') && text().includes('다 드셨네요'));
+  await waitFor(() => !$('#celebrate').hidden && $('#celebrate').textContent.includes('콩이가 배불러서 기뻐해요') && $('#celebrate').textContent.includes('4번 다 드셨어요'));
+  await waitFor(() => $('.pet-stage .pet-happy') && $('.bubble').textContent.includes('콩이가 배불러서 기뻐해요'));
   await writeFood('카스텔라');
   await waitFor(() => $('.slot-extra')?.textContent === '+1');
   if (doc().querySelectorAll('.list li').length !== 5) throw new Error('오늘 목록');
@@ -145,11 +149,11 @@ await test('성장: 0.5kg 늘면 한 단계 자라고, 줄어도 작아지지 �
   await open('today');
   await waitFor(() => levelText().startsWith('0/6단계'));  // 처음 53kg, 목표 56kg → 6단계
   await saveWeight(53.5);
-  await waitFor(() => !$('#celebrate').hidden && $('#celebrate').textContent.includes('쑥 자랐어요'));
+  await waitFor(() => !$('#celebrate').hidden && $('#celebrate').textContent.includes('콩이가 쑥 자랐어요'));
   await waitFor(() => levelText().startsWith('1/6단계'));
   await saveWeight(53.1);
-  await waitFor(() => $('#toast').textContent.includes('괜찮아요'));
-  await waitFor(() => levelText().startsWith('1/6단계') && $('.pet-stage .pet-cheer') && text().includes('그대로 자라 있어요'));
+  await waitFor(() => $('#toast').textContent.includes('괜찮아요, 콩이랑'));
+  await waitFor(() => levelText().startsWith('1/6단계') && $('.pet-stage .pet-cheer') && $('.bubble').textContent.includes('콩이는 그대로 자라 있어요'));
 });
 
 await test('성장: 다른 측정 시점 몸무게로는 자라지 않는다', async () => {
@@ -217,7 +221,7 @@ await test('백업 불러오기: 새 폰의 처음 시작 화면에서 전체 �
   if (!asked.includes('전체 백업')) throw new Error(asked);
   await waitFor(() => stored().grow?.started && stored().grow.notes.length === 5);
   await open('today');
-  await waitFor(() => $('.pet-stage svg')?.getAttribute('aria-label').startsWith('곰') && levelText().startsWith('1/6단계'));
+  await waitFor(() => $('.pet-stage svg')?.getAttribute('aria-label').startsWith('콩이(곰)') && levelText().startsWith('1/6단계'));
 });
 
 await test('설정 파일 불러오기: 기록은 그대로 두고 주의 음식만 합친다', async () => {
@@ -228,6 +232,59 @@ await test('설정 파일 불러오기: 기록은 그대로 두고 주의 음식
   if (!asked.includes('설정만 합칠까요')) throw new Error(asked);
   await waitFor(() => stored().grow.cautionWords.join('|') === '키위|바나나|토마토');
   if (stored().grow.notes.length !== 5 || stored().weights.length !== s.weights.length) throw new Error('기록이 바뀜');
+});
+
+await test('설정에서 이름 바꾸기, 비우면 기본 이름', async () => {
+  await open('settings');
+  (await waitFor(() => $('#set-name'))).value = '봄이';
+  $('#save-settings').click();
+  await waitFor(() => stored().grow.name === '봄이');
+  await open('today');
+  await waitFor(() => $('.pet-call').textContent === '봄이' && $('.bubble').textContent.includes('봄이'));
+  await open('settings');
+  (await waitFor(() => $('#set-name'))).value = '';
+  $('#save-settings').click();
+  await waitFor(() => stored().grow.name === '');
+  await open('today');
+  await waitFor(() => $('.pet-call').textContent === '도토리');
+});
+
+await test('이름 없이 이미 시작했던 사람: 친구·단계·기록은 그대로, 기본 이름으로 부르고 설정에서 이름을 붙일 수 있다', async () => {
+  // 이름 기능이 생기기 전 버전에서 저장된 상태 (grow 에 name 이 없음)
+  const before = {
+    app: 'mom-meal', version: 1, meals: [], favorites: [], servings: {}, units: {}, customFoods: [],
+    weights: [{ id: 'a', date: daysAgo(3), time: '08:00', kg: 52, timing: '아침' }, { id: 'b', date: daysAgo(1), time: '08:00', kg: 53.1, timing: '아침' }],
+    settings: { goalLow: 56, goalHigh: 56, kLow: 100, kHigh: 200, timings: ['아침', '저녁', '기타'] },
+    grow: { started: true, pet: 'cat', mealsPerDay: 3, timing: '아침', startKg: 52, startDate: daysAgo(3), cautionWords: [],
+      notes: [{ id: 'n', date: daysAgo(1), time: '08:00', name: '흰죽' }] },
+  };
+  localStorage.setItem('momMeal.v1', JSON.stringify(before));
+  await open('today');
+  await waitFor(() => $('.pet-call')?.textContent === '나비');
+  if (!levelText().startsWith('2/8단계')) throw new Error(levelText());
+  if (!$('.pet-stage svg').getAttribute('aria-label').startsWith('나비(고양이), 새싹')) throw new Error($('.pet-stage svg').getAttribute('aria-label'));
+  await open('settings');
+  const inp = await waitFor(() => $('#set-name'));
+  if (inp.value !== '' || inp.placeholder !== '나비') throw new Error('이름 칸');
+  inp.value = '구름';
+  $('#save-settings').click();
+  await waitFor(() => stored().grow.name === '구름');
+  const after = stored();
+  if (JSON.stringify(after.weights) !== JSON.stringify(before.weights) || after.grow.pet !== 'cat'
+    || after.grow.startKg !== 52 || JSON.stringify(after.grow.notes) !== JSON.stringify(before.grow.notes)) throw new Error('기록이 바뀜');
+  await open('today');
+  await waitFor(() => $('.pet-call').textContent === '구름' && levelText().startsWith('2/8단계'));
+});
+
+await test('움직임: 가만히 있을 때 숨 쉬고 눈을 깜빡인다 (동작 줄이기 규칙은 계산 테스트에서 확인)', async () => {
+  await open('today');
+  const w = frame.contentWindow;
+  const move = await waitFor(() => $('.pet-stage .pet-move'));
+  const svg = $('.pet-stage svg');
+  const expect = svg.classList.contains('pet-normal') ? 'pet-breathe' : svg.classList.contains('pet-happy') ? 'pet-hop' : 'pet-sway';
+  if (w.getComputedStyle(move).animationName !== expect) throw new Error(w.getComputedStyle(move).animationName);
+  const eye = $('.pet-stage .pet-eye');
+  if (eye && w.getComputedStyle(eye).animationName !== 'pet-blink') throw new Error('깜빡임 없음');
 });
 
 // 오프라인 동작은 tools/run_tests.py 가 서버를 끈 뒤 다시 열어서 확인한다.

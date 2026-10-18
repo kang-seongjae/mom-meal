@@ -10,6 +10,47 @@ export const PETS = {
   cat: '고양이',
 };
 
+// 이름을 비워 두면 쓰는 동물별 기본 이름
+export const DEFAULT_NAMES = {
+  bunny: '몽실',
+  chick: '보리',
+  bear: '도토리',
+  cat: '나비',
+};
+
+// 친구 이름: 지어 준 이름이 없으면 동물별 기본 이름
+export function petName(grow) {
+  const n = String(grow?.name ?? '').trim();
+  return n || DEFAULT_NAMES[grow?.pet] || '친구';
+}
+
+export function parsePetName(text) {
+  const n = String(text ?? '').trim().replace(/\s+/g, ' ');
+  if (n.length > 8) throw new Error('이름은 8글자 이하로 지어 주세요.');
+  if (/[<>"&]/.test(n)) throw new Error('이름에는 < > " & 를 쓸 수 없어요.');
+  return n;   // 빈 문자열이면 기본 이름을 쓴다
+}
+
+function hasBatchim(ch) {
+  const code = ch.charCodeAt(0) - 0xac00;
+  return code >= 0 && code < 11172 && code % 28 !== 0;
+}
+const isHangul = (ch) => { const c = ch.charCodeAt(0); return c >= 0xac00 && c <= 0xd7a3; };
+
+// 부를 때 쓰는 이름: 받침이 있으면 '이'를 붙인다 (몽실 → 몽실이, 나비 → 나비)
+export function callName(name) {
+  const last = name.slice(-1);
+  return last && hasBatchim(last) ? `${name}이` : name;
+}
+
+// 조사 붙이기. 한글 이름은 부르는 이름 뒤에(늘 모음으로 끝남), 한글이 아니면 (이)가 처럼 둘 다 적는다.
+export function withJosa(name, josa) {
+  const last = name.slice(-1);
+  if (last && isHangul(last)) return callName(name) + josa;
+  const pairs = { 가: '(이)가', 는: '(이)는', 랑: '(이)랑', 도: '도', 를: '(이)를', 와: '(이)와' };
+  return name + (pairs[josa] ?? josa);
+}
+
 // 성장 모습: 단계가 쌓인 정도(목표까지의 비율)에 따라 바뀐다. 마지막 모습은 목표에 도착했을 때만.
 export const FORMS = ['아기', '새싹', '목도리', '꽃', '꽃왕관'];
 
@@ -17,6 +58,7 @@ export function defaultGrow() {
   return {
     started: false,
     pet: null,
+    name: '',         // 지어 준 이름 (비우면 기본 이름)
     mealsPerDay: 4,
     timing: null,     // 성장에 쓰는 몸무게 측정 시점
     startKg: null,
@@ -141,6 +183,7 @@ export function validateGrow(g) {
   const bad = (msg) => { throw new Error(`키우기 정보 형식이 맞지 않아요 (${msg}).`); };
   if (typeof g !== 'object' || g === null || Array.isArray(g)) bad('전체');
   if (g.pet != null && !(g.pet in PETS)) bad('친구 종류');
+  if (g.name !== undefined && (typeof g.name !== 'string' || g.name.length > 8)) bad('친구 이름');
   if (g.mealsPerDay !== undefined) parseMealsPerDay(g.mealsPerDay);
   if (g.startKg != null && !(typeof g.startKg === 'number' && g.startKg > 0)) bad('시작 몸무게');
   if (g.cautionWords !== undefined && (!Array.isArray(g.cautionWords) || g.cautionWords.some((w) => typeof w !== 'string'))) bad('주의 음식');

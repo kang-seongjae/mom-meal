@@ -362,14 +362,35 @@ body.onboarding .tabbar { display: none; }
 .pet-stage svg { max-width: 100%; height: auto; }
 .pet-name { font-size: 1.3rem; font-weight: 800; margin: 0; }
 .pet-level { font-size: 1.1rem; color: var(--ink-2); margin: 2px 0 6px; }
-.pet-happy .pet-body { animation: hop 1.2s ease-in-out infinite; transform-origin: 100px 190px; }
-@keyframes hop {
+/* 친구 움직임: 가만히 있을 때 숨 쉬기와 가끔 눈 깜빡임, 기쁠 때 깡충, 응원할 때 살랑 */
+.pet .pet-move { transform-origin: 100px 190px; }
+.pet-normal .pet-move { animation: pet-breathe 3.2s ease-in-out infinite; }
+.pet-happy .pet-move { animation: pet-hop 1.1s ease-in-out infinite; }
+.pet-cheer .pet-move { animation: pet-sway 2.6s ease-in-out infinite; }
+.pet .pet-eye { transform-box: fill-box; transform-origin: center; animation: pet-blink 4.8s ease-in-out infinite; }
+.pet-chick .pet-eye { animation-delay: 1.2s; }
+.pet-bear .pet-eye { animation-delay: 2.1s; }
+.pet-cat .pet-eye { animation-delay: 3.3s; }
+@keyframes pet-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.015, 1.035); }
+}
+@keyframes pet-hop {
   0%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-8px); }
+  30% { transform: translateY(-9px); }
   55% { transform: translateY(0); }
 }
+@keyframes pet-sway {
+  0%, 100% { transform: rotate(-2.5deg); }
+  50% { transform: rotate(2.5deg); }
+}
+@keyframes pet-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+/* 기기에서 '동작 줄이기'를 켜면 친구의 움직임을 모두 멈춘다 */
 @media (prefers-reduced-motion: reduce) {
-  .pet-happy .pet-body { animation: none; }
+  .pet .pet-move, .pet .pet-eye { animation: none !important; }
 }
 
 .slots { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 4px 0 14px; }
@@ -403,3 +424,9 @@ textarea.text-input { min-height: 104px; border-radius: 20px; resize: vertical; 
 .celebrate svg { width: 150px; height: 150px; }
 .celebrate-title { font-size: 1.5rem; font-weight: 800; }
 .celebrate-sub { font-size: 1.15rem; font-weight: 600; color: var(--ink-2); }
+
+/* 빈 칸의 안내 글씨도 진하게 (흰 바탕 7.6:1, 크림 바탕 7.2:1) */
+::placeholder { color: #545454; opacity: 1; }
+.name-card { text-align: center; }
+.name-card .field { text-align: left; }
+.pet-call { color: var(--accent-text); }

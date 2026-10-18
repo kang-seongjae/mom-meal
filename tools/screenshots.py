@@ -14,24 +14,29 @@ SHOTS = {
     # 처음 시작 (아무 기록 없음 / 예전 화면에서 쓰던 기록이 있음)
     "01-start-meals": "start&fresh=1",
     "02-start-pet": "start&fresh=1&@click=%23s-next%7C%5Bdata-pet%3Dbear%5D",
-    "03-start-weight": "start&legacy=1&@click=%23s-next%7C%5Bdata-pet%3Dbear%5D%7C%23s-next",
+    "03-start-name": "start&fresh=1&@click=%23s-next%7C%5Bdata-pet%3Dbear%5D%7C%23s-next",
+    "04-start-weight": "start&legacy=1&@click=%23s-next%7C%5Bdata-pet%3Dbear%5D%7C%23s-next%7C%23s-next",
     # 성장 단계 (처음 52kg, 목표 56kg: 0.5kg 마다 한 단계, 모두 8단계)
-    "04-stage0-baby": "today&kg=52.3&n=1",
-    "05-stage1-sprout": "today&kg=53.1&n=2",
-    "06-stage2-scarf": "today&kg=54.1&n=2",
-    "07-stage3-flower": "today&kg=55.2&n=3",
-    "08-stage4-final": "today&kg=56&n=2",
+    "05-stage0-baby": "today&kg=52.3&n=1",
+    "06-stage1-sprout": "today&kg=53.1&n=2",
+    "07-stage2-scarf": "today&kg=54.1&n=2",
+    "08-stage3-flower": "today&kg=55.2&n=3",
+    "09-stage4-final": "today&kg=56&n=2",
     # 오늘 다 먹은 날, 몸무게가 줄어든 날, 칼륨 주의 음식을 적은 때, 다 채우는 순간
-    "09-meals-done-happy": "today&kg=54.1&n=4",
-    "10-weight-drop-cheer": "today&kg=54.1&drop=1&n=2",
-    "11-caution-note": "today&kg=53.1&n=1&@click=%5Bdata-quick%3D%22%EB%B0%94%EB%82%98%EB%82%98%EC%9A%B0%EC%9C%A0%22%5D",
-    "12-celebrate-done": "today&kg=53.1&n=3&@click=%5Bdata-quick%5D&hold=1",
-    "13-records": "records&kg=54.1",
-    "14-settings": "settings&kg=54.1",
-    "15-today-dark-mode-phone": "today&kg=54.1",
-    # 네 친구의 다섯 가지 모습 모아 보기
-    "16-pets-gallery": "/tests/pets.html",
+    "10-meals-done-happy": "today&kg=54.1&n=4",
+    "11-weight-drop-cheer": "today&kg=54.1&drop=1&n=2",
+    "12-caution-note": "today&kg=53.1&n=1&@click=%5Bdata-quick%3D%22%EB%B0%94%EB%82%98%EB%82%98%EC%9A%B0%EC%9C%A0%22%5D",
+    "13-celebrate-done": "today&kg=53.1&n=3&@click=%5Bdata-quick%5D&hold=1",
+    "14-records": "records&kg=54.1",
+    "15-settings": "settings&kg=54.1",
+    "16-today-dark-mode-phone": "today&kg=54.1",
+    # 네 친구 × 다섯 모습 모아 보기 (기본·기뻐함·응원)
+    "pets-normal": "/tests/pets.html?mood=normal",
+    "pets-happy": "/tests/pets.html?mood=happy",
+    "pets-cheer": "/tests/pets.html?mood=cheer",
 }
+# 스크린샷은 움직임을 멈춘 모습으로 찍는다 (눈 깜빡이는 순간이 찍히지 않도록)
+STILL = ["--force-prefers-reduced-motion"]
 # 폰 다크 모드 + 브라우저의 '웹페이지 자동 어둡게' 기능을 켠 상태
 DARK_FLAGS = ["--force-dark-mode", "--enable-features=WebContentsForceDark"]
 
@@ -59,7 +64,7 @@ def main(out_dir):
         png = out / (name + ".png")
         with tempfile.TemporaryDirectory() as prof:
             extra = DARK_FLAGS if "dark-mode" in name else []
-            run_browser([*extra, f"--window-size=600,{H + 200}", "--force-device-scale-factor=2",
+            run_browser([*STILL, *extra, f"--window-size=600,{H + 200}", "--force-device-scale-factor=2",
                          "--virtual-time-budget=10000", f"--screenshot={png}", url], prof)
         Image.open(png).crop((0, 0, W * 2, H * 2)).save(png)
         print(png)

@@ -1,138 +1,179 @@
 // 함께 자라는 친구 그림 (SVG). 이 앱을 위해 단순한 동그라미 모양으로 직접 그린 동물들이다.
+// 머리는 크고 몸은 작게, 큰 눈과 반짝이는 하이라이트, 연한 볼터치.
 // form: 0 아기, 1 새싹, 2 목도리, 3 꽃, 4 꽃왕관(목표 도착) / scale: 단계마다 조금씩 커진다
-// mood: 'normal' | 'happy'(다 먹은 날·자란 날) | 'cheer'(몸무게가 줄어든 날, 응원)
+// mood: 'normal'(숨 쉬기·눈 깜빡임) | 'happy'(다 먹은 날·자란 날: ^^ 눈, 벌린 입, 든 팔, 하트)
+//       | 'cheer'(몸무게가 줄어든 날: 힘준 눈썹, 두 손으로 든 하트)
+// 움직임은 app.css 의 .pet-* 애니메이션이 맡고, 기기의 '동작 줄이기'를 켜면 멈춘다.
 import { PETS, FORMS } from './grow.js';
 
-const INK = '#5b4636';
+const INK = '#6b5040';
+const EYE = '#3d2b24';
 const COLORS = {
-  bunny: { body: '#fff3f6', inner: '#ffc4d4', belly: '#ffffff' },
-  chick: { body: '#ffe27a', inner: '#ffb547', belly: '#fff2b8' },
-  bear: { body: '#e3b58b', inner: '#f5d9bd', belly: '#f5d9bd' },
-  cat: { body: '#d3dfee', inner: '#ffc4d4', belly: '#f1f5fa' },
+  bunny: { body: '#fff3f6', belly: '#ffffff', inner: '#ffcadb', nose: '#ff9fb5' },
+  chick: { body: '#fff1a6', belly: '#fff9d9', inner: '#ffe07a', nose: '#ffb067' },
+  bear: { body: '#f1cfad', belly: '#fbe6d2', inner: '#f8d9c0', nose: '#6b4a3a' },
+  cat: { body: '#e1e9f6', belly: '#f7f9fd', inner: '#ffcadb', nose: '#ff9fb5' },
 };
+const line = (w = 3) => `stroke="${INK}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"`;
 
 function ears(kind, c) {
   if (kind === 'bunny') {
     return `
-      <ellipse cx="78" cy="42" rx="13" ry="34" transform="rotate(-12 78 42)" fill="${c.body}" stroke="${INK}" stroke-width="3"/>
-      <ellipse cx="78" cy="44" rx="6" ry="22" transform="rotate(-12 78 44)" fill="${c.inner}"/>
-      <ellipse cx="122" cy="42" rx="13" ry="34" transform="rotate(12 122 42)" fill="${c.body}" stroke="${INK}" stroke-width="3"/>
-      <ellipse cx="122" cy="44" rx="6" ry="22" transform="rotate(12 122 44)" fill="${c.inner}"/>`;
+      <ellipse cx="76" cy="32" rx="13" ry="27" transform="rotate(-14 76 32)" fill="${c.body}" ${line()}/>
+      <ellipse cx="76" cy="35" rx="6" ry="17" transform="rotate(-14 76 35)" fill="${c.inner}"/>
+      <ellipse cx="124" cy="32" rx="13" ry="27" transform="rotate(14 124 32)" fill="${c.body}" ${line()}/>
+      <ellipse cx="124" cy="35" rx="6" ry="17" transform="rotate(14 124 35)" fill="${c.inner}"/>`;
   }
   if (kind === 'bear') {
     return `
-      <circle cx="62" cy="52" r="17" fill="${c.body}" stroke="${INK}" stroke-width="3"/>
-      <circle cx="62" cy="52" r="8" fill="${c.inner}"/>
-      <circle cx="138" cy="52" r="17" fill="${c.body}" stroke="${INK}" stroke-width="3"/>
-      <circle cx="138" cy="52" r="8" fill="${c.inner}"/>`;
+      <circle cx="52" cy="54" r="18" fill="${c.body}" ${line()}/><circle cx="52" cy="54" r="9" fill="${c.inner}"/>
+      <circle cx="148" cy="54" r="18" fill="${c.body}" ${line()}/><circle cx="148" cy="54" r="9" fill="${c.inner}"/>`;
   }
   if (kind === 'cat') {
     return `
-      <path d="M58 70 L64 30 L92 50 Z" fill="${c.body}" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>
-      <path d="M66 58 L69 40 L82 50 Z" fill="${c.inner}"/>
-      <path d="M142 70 L136 30 L108 50 Z" fill="${c.body}" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>
-      <path d="M134 58 L131 40 L118 50 Z" fill="${c.inner}"/>`;
+      <path d="M48 80 L54 30 L90 52 Z" fill="${c.body}" ${line()}/><path d="M57 66 L60 42 L80 54 Z" fill="${c.inner}"/>
+      <path d="M152 80 L146 30 L110 52 Z" fill="${c.body}" ${line()}/><path d="M143 66 L140 42 L120 54 Z" fill="${c.inner}"/>`;
   }
   // 병아리: 머리 위 깃털 세 가닥
   return `
-    <path d="M92 42 Q90 28 98 24" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>
-    <path d="M100 40 Q102 24 110 22" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>
-    <path d="M106 44 Q114 34 120 34" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>`;
+    <path d="M92 44 Q88 30 96 24" fill="none" ${line()}/>
+    <path d="M100 42 Q101 26 110 21" fill="none" ${line()}/>
+    <path d="M108 45 Q116 34 124 34" fill="none" ${line()}/>`;
+}
+
+// 동그란 큰 눈 (반짝이는 하이라이트 두 개). 깜빡임은 .pet-eye 에 움직임을 준다.
+function roundEye(cx, cy) {
+  return `<g class="pet-eye"><circle cx="${cx}" cy="${cy}" r="11" fill="${EYE}"/>
+    <circle cx="${cx + 3.6}" cy="${cy - 4}" r="4.2" fill="#fff"/><circle cx="${cx - 3.8}" cy="${cy + 4.2}" r="1.8" fill="#fff"/></g>`;
 }
 
 function face(kind, mood, c) {
-  const eyes = mood === 'happy'
-    ? `<path d="M74 92 Q82 82 90 92" fill="none" stroke="${INK}" stroke-width="4" stroke-linecap="round"/>
-       <path d="M110 92 Q118 82 126 92" fill="none" stroke="${INK}" stroke-width="4" stroke-linecap="round"/>`
-    : `<circle cx="82" cy="90" r="6.5" fill="${INK}"/><circle cx="84.5" cy="87.5" r="2" fill="#fff"/>
-       <circle cx="118" cy="90" r="6.5" fill="${INK}"/><circle cx="120.5" cy="87.5" r="2" fill="#fff"/>`;
-  const blush = `<ellipse cx="68" cy="104" rx="9" ry="5" fill="#ff9fa8" opacity="0.6"/>
-    <ellipse cx="132" cy="104" rx="9" ry="5" fill="#ff9fa8" opacity="0.6"/>`;
+  let eyes;
+  if (mood === 'happy') {  // 기쁨: 웃느라 감은 ^ ^ 눈
+    eyes = `<path d="M64 103 Q76 88 88 103" fill="none" stroke="${EYE}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M112 103 Q124 88 136 103" fill="none" stroke="${EYE}" stroke-width="5" stroke-linecap="round"/>`;
+  } else {
+    eyes = roundEye(76, 100) + roundEye(124, 100);
+  }
+  // 응원: 안쪽이 살짝 올라간 힘준 눈썹
+  const brows = mood === 'cheer'
+    ? `<g class="pet-brows"><path d="M63 82 Q72 76 85 80" fill="none" stroke="${EYE}" stroke-width="3.5" stroke-linecap="round"/>
+       <path d="M137 82 Q128 76 115 80" fill="none" stroke="${EYE}" stroke-width="3.5" stroke-linecap="round"/></g>`
+    : '';
+  const blushOpacity = mood === 'happy' ? 0.85 : 0.6;
+  const blush = `<ellipse cx="58" cy="119" rx="12" ry="7" fill="#ffb3c4" opacity="${blushOpacity}"/>
+    <ellipse cx="142" cy="119" rx="12" ry="7" fill="#ffb3c4" opacity="${blushOpacity}"/>`;
+
   let mouth;
   if (kind === 'chick') {
-    mouth = `<path d="M93 100 L107 100 L100 109 Z" fill="#ff9d3a" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/>`;
-  } else if (kind === 'bear') {
-    mouth = `<ellipse cx="100" cy="106" rx="19" ry="13" fill="${c.inner}" stroke="${INK}" stroke-width="2.5"/>
-      <ellipse cx="100" cy="100" rx="6" ry="4.5" fill="${INK}"/>
-      ${mood === 'happy' ? `<path d="M93 108 Q100 117 107 108" fill="#e86a6a" stroke="${INK}" stroke-width="2.5"/>`
-        : `<path d="M94 108 Q100 113 106 108" fill="none" stroke="${INK}" stroke-width="2.5" stroke-linecap="round"/>`}`;
-  } else {
     mouth = mood === 'happy'
-      ? `<path d="M92 104 Q100 115 108 104 Z" fill="#e86a6a" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/>`
-      : `<path d="M92 104 Q96 109 100 104 Q104 109 108 104" fill="none" stroke="${INK}" stroke-width="2.5" stroke-linecap="round"/>`;
+      ? `<path d="M90 112 L110 112 L100 120 Z" fill="${c.nose}" ${line(2.5)}/><path d="M92 121 L108 121 L100 128 Z" fill="${c.nose}" ${line(2.5)}/>`
+      : `<path d="M91 113 L109 113 L100 123 Z" fill="${c.nose}" ${line(2.5)}/>`;
+  } else {
+    const nose = kind === 'bear'
+      ? `<ellipse cx="100" cy="122" rx="21" ry="15" fill="${c.belly}" ${line(2.5)}/><ellipse cx="100" cy="115" rx="7" ry="5" fill="${c.nose}"/>`
+      : `<ellipse cx="100" cy="112" rx="4" ry="3" fill="${c.nose}"/>`;
+    const y = kind === 'bear' ? 121 : 117;
+    if (mood === 'happy') {
+      mouth = `<path d="M88 ${y} Q100 ${y + 18} 112 ${y} Z" fill="#ff8f9c" ${line(2.5)}/><ellipse cx="100" cy="${y + 9}" rx="5" ry="3.5" fill="#ffc2ca"/>`;
+    } else if (mood === 'cheer') {
+      mouth = `<path d="M90 ${y} Q100 ${y + 10} 110 ${y}" fill="none" ${line(3)}/>`;
+    } else {
+      mouth = `<path d="M92 ${y} Q96 ${y + 5} 100 ${y} Q104 ${y + 5} 108 ${y}" fill="none" ${line(2.5)}/>`;
+    }
+    mouth = nose + mouth;
   }
   const whiskers = kind === 'cat'
-    ? `<path d="M56 98 L72 100 M56 106 L72 105 M144 98 L128 100 M144 106 L128 105" stroke="${INK}" stroke-width="2" stroke-linecap="round"/>`
+    ? `<path d="M40 112 L54 114 M40 121 L54 120 M160 112 L146 114 M160 121 L146 120" ${line(2)}/>`
     : '';
-  return eyes + blush + mouth + whiskers;
+  return blush + brows + `<g class="pet-eyes">${eyes}</g>` + mouth + whiskers;
 }
 
-function flower(cx, cy, r, petal = '#ffb6c8') {
+function flower(cx, cy, r, petal = '#ffbfd0') {
   const petals = [0, 72, 144, 216, 288].map((a) => {
     const x = cx + Math.cos((a * Math.PI) / 180) * r;
     const y = cy + Math.sin((a * Math.PI) / 180) * r;
     return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r * 0.85}" fill="${petal}" stroke="${INK}" stroke-width="1.5"/>`;
   }).join('');
-  return `${petals}<circle cx="${cx}" cy="${cy}" r="${r * 0.7}" fill="#ffd75e" stroke="${INK}" stroke-width="1.5"/>`;
+  return `${petals}<circle cx="${cx}" cy="${cy}" r="${r * 0.7}" fill="#ffd96b" stroke="${INK}" stroke-width="1.5"/>`;
 }
 
-function accessories(form) {
+function sparkle(x, y, s = 1) {
+  return `<path d="M${x} ${y - 9 * s} L${x + 3 * s} ${y - 3 * s} L${x + 9 * s} ${y} L${x + 3 * s} ${y + 3 * s} L${x} ${y + 9 * s} L${x - 3 * s} ${y + 3 * s} L${x - 9 * s} ${y} L${x - 3 * s} ${y - 3 * s} Z" fill="#ffd96b" stroke="${INK}" stroke-width="1.5"/>`;
+}
+
+function heart(x, y, s, fill = '#ff8fa3') {
+  return `<path d="M${x} ${y + 6 * s} C${x - 12 * s} ${y - 4 * s} ${x - 6 * s} ${y - 12 * s} ${x} ${y - 5 * s}
+    C${x + 6 * s} ${y - 12 * s} ${x + 12 * s} ${y - 4 * s} ${x} ${y + 6 * s} Z" fill="${fill}" stroke="${INK}" stroke-width="1.8"/>`;
+}
+
+function headTop(form) {
   let s = '';
   if (form >= 1 && form < 4) {   // 새싹
-    s += `<path d="M100 40 Q98 26 100 16" fill="none" stroke="#4f9a3f" stroke-width="4" stroke-linecap="round"/>
-      <path d="M100 22 Q88 10 80 18 Q90 28 100 22 Z" fill="#8fd06f" stroke="#4f9a3f" stroke-width="2"/>
-      <path d="M100 20 Q112 6 121 13 Q112 25 100 20 Z" fill="#8fd06f" stroke="#4f9a3f" stroke-width="2"/>`;
+    s += `<path d="M100 44 Q98 32 100 22" fill="none" stroke="#4f9a3f" stroke-width="4" stroke-linecap="round"/>
+      <path d="M100 28 Q88 15 79 23 Q90 34 100 28 Z" fill="#9bd77d" stroke="#4f9a3f" stroke-width="2"/>
+      <path d="M100 26 Q112 11 122 18 Q113 31 100 26 Z" fill="#9bd77d" stroke="#4f9a3f" stroke-width="2"/>`;
   }
-  if (form >= 2) {               // 목도리
-    s += `<path d="M58 126 Q100 142 142 126 L142 138 Q100 154 58 138 Z" fill="#f08a8a" stroke="${INK}" stroke-width="2.5"/>
-      <path d="M124 138 L132 166 L118 164 L114 140 Z" fill="#f08a8a" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/>`;
-  }
-  if (form === 3) s += flower(140, 62, 7);   // 귀 옆 꽃
-  if (form >= 4) {               // 꽃왕관과 반짝이
-    s += [[66, 52, '#ffb6c8'], [83, 42, '#ffd1a1'], [100, 38, '#c9b6ff'], [117, 42, '#ffd1a1'], [134, 52, '#ffb6c8']]
-      .map(([x, y, col]) => flower(x, y, 6, col)).join('');
-    s += [[30, 60], [170, 70], [40, 150], [165, 140]]
-      .map(([x, y]) => `<path d="M${x} ${y - 9} L${x + 3} ${y - 3} L${x + 9} ${y} L${x + 3} ${y + 3} L${x} ${y + 9} L${x - 3} ${y + 3} L${x - 9} ${y} L${x - 3} ${y - 3} Z" fill="#ffd75e" stroke="${INK}" stroke-width="1.5"/>`)
-      .join('');
+  if (form === 3) s += flower(146, 62, 7);            // 귀 옆 꽃
+  if (form >= 4) {                                     // 꽃왕관
+    s += [[62, 60, '#ffbfd0'], [79, 47, '#ffd6ad'], [100, 42, '#d4c4ff'], [121, 47, '#ffd6ad'], [138, 60, '#ffbfd0']]
+      .map(([x, y, col]) => flower(x, y, 6.5, col)).join('');
   }
   return s;
 }
 
-function heart(x, y, s, fill = '#ff7b8f') {
-  return `<path d="M${x} ${y + 6 * s} C${x - 12 * s} ${y - 4 * s} ${x - 6 * s} ${y - 12 * s} ${x} ${y - 5 * s}
-    C${x + 6 * s} ${y - 12 * s} ${x + 12 * s} ${y - 4 * s} ${x} ${y + 6 * s} Z" fill="${fill}" stroke="${INK}" stroke-width="1.5"/>`;
+function scarf(form) {
+  if (form < 2) return '';
+  return `<path d="M62 140 Q100 157 138 140 L139 151 Q100 168 61 151 Z" fill="#f59a9a" ${line(2.5)}/>
+    <path d="M118 152 L126 176 L112 174 L108 154 Z" fill="#f59a9a" ${line(2.5)}/>`;
 }
 
-export function petLabel(kind, form) {
-  return `${PETS[kind] ?? '친구'}, ${FORMS[form]} 모습`;
+function arms(kind, mood, c) {
+  const fill = kind === 'chick' ? c.inner : c.body;
+  if (mood === 'happy') {   // 신나서 두 팔을 번쩍
+    return `<ellipse cx="62" cy="142" rx="9" ry="14" transform="rotate(40 62 142)" fill="${fill}" ${line()}/>
+      <ellipse cx="138" cy="142" rx="9" ry="14" transform="rotate(-40 138 142)" fill="${fill}" ${line()}/>`;
+  }
+  if (mood === 'cheer') {   // 두 손을 모아 하트를 든 모습 (하트는 앞에 따로 그림)
+    return `<ellipse cx="84" cy="160" rx="9" ry="12" transform="rotate(-35 84 160)" fill="${fill}" ${line()}/>
+      <ellipse cx="116" cy="160" rx="9" ry="12" transform="rotate(35 116 160)" fill="${fill}" ${line()}/>`;
+  }
+  return `<ellipse cx="66" cy="160" rx="9" ry="13" transform="rotate(25 66 160)" fill="${fill}" ${line()}/>
+    <ellipse cx="134" cy="160" rx="9" ry="13" transform="rotate(-25 134 160)" fill="${fill}" ${line()}/>`;
+}
+
+export function petLabel(kind, form, name = '') {
+  const who = name ? `${name}(${PETS[kind] ?? '친구'})` : (PETS[kind] ?? '친구');
+  return `${who}, ${FORMS[form]} 모습`;
 }
 
 // crop: 작은 모습일 때 그림 위쪽 빈 곳을 잘라서 화면을 덜 차지하게 한다 (첫 화면용)
-export function petSvg({ kind, form = 0, scale = 1, mood = 'normal', size = 200, crop = false }) {
+export function petSvg({ kind, form = 0, scale = 1, mood = 'normal', size = 200, crop = false, name = '' }) {
   const c = COLORS[kind] ?? COLORS.bunny;
-  const arms = kind === 'chick'
-    ? `<path d="M50 134 Q36 140 44 152 Q54 150 58 140 Z" fill="${c.inner}" stroke="${INK}" stroke-width="2.5"/>
-       <path d="M150 134 Q164 140 156 152 Q146 150 142 140 Z" fill="${c.inner}" stroke="${INK}" stroke-width="2.5"/>`
-    : `<ellipse cx="56" cy="142" rx="10" ry="15" transform="rotate(${mood === 'happy' ? 40 : 20} 56 142)" fill="${c.body}" stroke="${INK}" stroke-width="3"/>
-       <ellipse cx="144" cy="142" rx="10" ry="15" transform="rotate(${mood === 'happy' ? -40 : -20} 144 142)" fill="${c.body}" stroke="${INK}" stroke-width="3"/>`;
-  const extra = mood === 'happy' ? heart(36, 40, 1) + heart(166, 34, 0.8)
-    : mood === 'cheer' ? heart(100, 150, 1.3) : '';
   const top = crop ? Math.max(0, Math.round(190 - 190 * scale)) : 0;
   const h = 200 - top;
-  return `<svg class="pet pet-${mood}" viewBox="0 ${top} 200 ${h}" width="${size}" height="${Math.round((size * h) / 200)}" role="img" aria-label="${petLabel(kind, form)}">
-    <ellipse cx="100" cy="190" rx="${48 * scale}" ry="7" fill="#000" opacity="0.08"/>
+  const final = form >= 4;
+  const around = [
+    final ? sparkle(26, 72) + sparkle(174, 80) + sparkle(30, 150, 0.8) + sparkle(170, 146, 0.8) : '',
+    mood === 'happy' ? heart(30, 44, 0.9) + heart(170, 36, 0.75) : '',
+  ].join('');
+  return `<svg class="pet pet-${mood} pet-${kind}" viewBox="0 ${top} 200 ${h}" width="${size}" height="${Math.round((size * h) / 200)}" role="img" aria-label="${petLabel(kind, form, name)}">
+    <ellipse cx="100" cy="191" rx="${(42 * scale).toFixed(1)}" ry="6" fill="#000" opacity="0.08"/>
     <g transform="translate(100 190) scale(${scale.toFixed(3)}) translate(-100 -190)">
-      <g class="pet-body">
-        <ellipse cx="78" cy="180" rx="15" ry="9" fill="${c.body}" stroke="${INK}" stroke-width="3"/>
-        <ellipse cx="122" cy="180" rx="15" ry="9" fill="${c.body}" stroke="${INK}" stroke-width="3"/>
-        <ellipse cx="100" cy="146" rx="50" ry="38" fill="${c.body}" stroke="${INK}" stroke-width="3"/>
-        <ellipse cx="100" cy="152" rx="30" ry="24" fill="${c.belly}"/>
-        ${arms}
+      <g class="pet-move">
+        <ellipse cx="83" cy="182" rx="13" ry="8" fill="${c.body}" ${line()}/>
+        <ellipse cx="117" cy="182" rx="13" ry="8" fill="${c.body}" ${line()}/>
+        <ellipse cx="100" cy="160" rx="38" ry="28" fill="${c.body}" ${line()}/>
+        <ellipse cx="100" cy="165" rx="22" ry="16" fill="${c.belly}"/>
+        ${mood === 'cheer' ? '' : arms(kind, mood, c)}
         ${ears(kind, c)}
-        <circle cx="100" cy="92" r="50" fill="${c.body}" stroke="${INK}" stroke-width="3"/>
+        <ellipse cx="100" cy="96" rx="60" ry="54" fill="${c.body}" ${line()}/>
+        ${kind === 'cat' ? `<path d="M90 48 L92 60 M100 46 L100 60 M110 48 L108 60" stroke="#c5d3ea" stroke-width="4" stroke-linecap="round"/>` : ''}
         ${face(kind, mood, c)}
-        ${accessories(form)}
-        ${extra}
+        ${headTop(form)}
+        ${scarf(form)}
+        ${mood === 'cheer' ? arms(kind, mood, c) + heart(100, 158, 1.5) : ''}
+        ${around}
       </g>
     </g>
   </svg>`;
