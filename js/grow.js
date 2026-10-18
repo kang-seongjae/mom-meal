@@ -51,6 +51,14 @@ export function withJosa(name, josa) {
   return name + (pairs[josa] ?? josa);
 }
 
+// '로/으로' 붙이기: 받침이 없거나 ㄹ 받침이면 '로', 다른 받침이면 '으로' (도토리로, 몽실로, 콩으로)
+export function withRo(word) {
+  const last = word.slice(-1);
+  if (!last || !isHangul(last)) return `${word}(으)로`;
+  const jong = (last.charCodeAt(0) - 0xac00) % 28;
+  return word + (jong === 0 || jong === 8 ? '로' : '으로');
+}
+
 // 성장 모습: 단계가 쌓인 정도(목표까지의 비율)에 따라 바뀐다. 마지막 모습은 목표에 도착했을 때만.
 export const FORMS = ['아기', '새싹', '목도리', '꽃', '꽃왕관'];
 

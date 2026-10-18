@@ -69,6 +69,8 @@ def readability_check():
             problems.append(f"글씨 {row['minFont']}px ({row['minFontText']})")
         if row["minContrast"] < MIN_CONTRAST:
             problems.append(f"대비 {row['minContrast']}:1 ({row['minContrastText']})")
+        if row.get("placeholders"):
+            problems.append(f"칸 안 안내 글씨 {row['placeholders']}")
         if row["minTarget"] < MIN_TARGET_PX:
             problems.append(f"버튼 {row['minTarget']}px ({row['minTargetText']})")
         ok &= not problems

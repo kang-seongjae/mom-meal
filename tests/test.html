@@ -568,6 +568,8 @@ await test('친구 이름 조사: 받침이 있으면 "○○이가", 없으면 
   eq(G.withJosa('콩이', '가'), '콩이가', '이름이 이미 "이"로 끝나도 자연스럽게');
   eq(G.withJosa('Coco', '가'), 'Coco(이)가', '한글이 아니면 둘 다 적음');
   eq(G.callName('몽실'), '몽실이'); eq(G.callName('나비'), '나비');
+  eq(G.withRo('도토리'), '도토리로'); eq(G.withRo('몽실'), '몽실로', 'ㄹ 받침은 로'); eq(G.withRo('보리'), '보리로');
+  eq(G.withRo('나비'), '나비로'); eq(G.withRo('콩'), '콩으로'); eq(G.withRo('Coco'), 'Coco(으)로');
 });
 await test('친구 그림: 이름표에 이름이 들어가고, 기본·기뻐함·응원 표정이 서로 다르다', () => {
   eq(petSvg({ kind: 'bear', name: '도토리' }).includes('aria-label="도토리(곰), 아기 모습"'), true);

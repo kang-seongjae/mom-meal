@@ -87,7 +87,9 @@ await test('처음 시작: 예전 기록이 있으면 몸무게·목표를 이�
   await waitFor(() => $('[data-pet="bear"]').classList.contains('on'));
   $('#s-next').click();
   const nameInput = await waitFor(() => $('#s-name'));
-  if (nameInput.placeholder !== '도토리' || !text().includes('이름을 지어 주세요')) throw new Error('이름 단계: ' + nameInput.placeholder);
+  if (nameInput.hasAttribute('placeholder') || nameInput.value !== '') throw new Error('이름 칸 안은 비어 있어야 함');
+  if (!text().includes('이름을 지어 주세요') || $('#s-name-hint').textContent !== '비워 두면 도토리로 불러요.') throw new Error('이름 안내: ' + $('#s-name-hint')?.textContent);
+  if (!nameInput.closest('label').textContent.trim().startsWith('친구 이름')) throw new Error('칸 위 제목 없음');
   setVal('#s-name', '콩이');
   $('#s-next').click();
   await waitFor(() => $('#s-kg'));
@@ -108,6 +110,7 @@ await test('처음 시작: 예전 기록이 있으면 몸무게·목표를 이�
 
 await test('음식 적기: 적을 때마다 칸이 채워지고, 다 채우면 친구가 기뻐하며 칭찬', async () => {
   await open('today');
+  if ($('#note').hasAttribute('placeholder') || $('label[for="note"]')?.textContent !== '드신 음식 이름') throw new Error('음식 칸 위 제목');
   await writeFood('흰죽');
   await waitFor(() => doc().querySelectorAll('.slot.on').length === 1);
   if (!$('#toast').textContent.includes('잘 드셨어요')) throw new Error($('#toast').textContent);
@@ -265,7 +268,10 @@ await test('이름 없이 이미 시작했던 사람: 친구·단계·기록은 
   if (!$('.pet-stage svg').getAttribute('aria-label').startsWith('나비(고양이), 새싹')) throw new Error($('.pet-stage svg').getAttribute('aria-label'));
   await open('settings');
   const inp = await waitFor(() => $('#set-name'));
-  if (inp.value !== '' || inp.placeholder !== '나비') throw new Error('이름 칸');
+  if (inp.value !== '' || inp.hasAttribute('placeholder') || $('#set-name-hint').textContent !== '비워 두면 나비로 불러요.') throw new Error('이름 칸');
+  $('[data-pet="bunny"]').click();
+  if ($('#set-name-hint').textContent !== '비워 두면 몽실로 불러요.') throw new Error('친구를 바꾸면 안내도 바뀜: ' + $('#set-name-hint').textContent);
+  $('[data-pet="cat"]').click();
   inp.value = '구름';
   $('#save-settings').click();
   await waitFor(() => stored().grow.name === '구름');

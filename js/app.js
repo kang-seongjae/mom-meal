@@ -4,7 +4,7 @@ import {
 import { load, save, newId, exportJson, exportSettingsJson, readBackupFile } from './store.js';
 import { renderWeightChart } from './chart.js';
 import {
-  PETS, FORMS, DEFAULT_NAMES, petName, parsePetName, withJosa, callName, growState, todayProgress, frequentFoods, rewards, recordStreak,
+  PETS, FORMS, DEFAULT_NAMES, petName, parsePetName, withJosa, withRo, growState, todayProgress, frequentFoods, rewards, recordStreak,
   parseCautionWords, cautionMatches, parseFoodName, parseMealsPerDay,
 } from './grow.js';
 import { petSvg } from './pet.js';
@@ -69,7 +69,7 @@ function dateLabel(dateStr) {
 function stepper(id, value, step, unit, label) {
   return `<div class="stepper">
     <button class="step" data-step="${id}" data-d="${-step}" aria-label="${label} ${step} 빼기">−</button>
-    <label class="kg-input"><input id="${id}" type="number" inputmode="decimal" step="${step}" value="${value ?? ''}" placeholder="0" aria-label="${label}"><span>${unit}</span></label>
+    <label class="kg-input"><input id="${id}" type="number" inputmode="decimal" step="${step}" value="${value ?? ''}" aria-label="${label}"><span>${unit}</span></label>
     <button class="step" data-step="${id}" data-d="${step}" aria-label="${label} ${step} 더하기">+</button>
   </div>`;
 }
@@ -131,8 +131,8 @@ function renderStart() {
       <p class="lead">${esc(PETS[d.pet])} 친구를 뭐라고 부를까요?</p>
       <section class="card card-peach name-card">
         <div class="pet-stage">${petSvg({ kind: d.pet, form: 0, scale: 1, size: 150, name: d.name || def })}</div>
-        <label class="field">친구 이름<input id="s-name" class="text-input" maxlength="8" value="${esc(d.name)}" placeholder="${esc(def)}" autocomplete="off"></label>
-        <p class="small muted">비워 두면 "${esc(callName(def))}"라고 불러요. 나중에 설정에서 바꿀 수 있어요.</p>
+        <label class="field">친구 이름<input id="s-name" class="text-input" maxlength="8" value="${esc(d.name)}" autocomplete="off" aria-describedby="s-name-hint"></label>
+        <p class="small muted" id="s-name-hint">비워 두면 ${esc(withRo(def))} 불러요.</p>
       </section>
       <button class="btn btn-primary" id="s-next">다음</button>
       <button class="btn btn-secondary" id="s-back">이전</button>`;
@@ -274,7 +274,8 @@ function renderToday() {
         ${extra ? `<span class="slot-extra">+${extra}</span>` : ''}
       </div>
       <form id="note-form" class="note-form">
-        <input id="note" class="text-input" type="text" maxlength="30" placeholder="드신 음식 이름" autocomplete="off" aria-label="드신 음식 이름">
+        <label class="field" for="note">드신 음식 이름</label>
+        <input id="note" class="text-input" type="text" maxlength="30" autocomplete="off">
         <button class="btn btn-primary" type="submit">적기</button>
       </form>
       ${cautionNote ? `<p class="knote k-high" role="status">${esc(cautionNote)}</p>` : ''}
@@ -443,8 +444,8 @@ function renderSettings() {
           ${petSvg({ kind: k, form: growNow().form, scale: 1, size: 90 })}<span>${name}</span></button>`).join('')}
       </div>
       <p class="small muted">친구를 바꿔도 자란 단계는 그대로예요.</p>
-      <label class="field">친구 이름<input id="set-name" class="text-input" maxlength="8" value="${esc(g().name || '')}" placeholder="${esc(DEFAULT_NAMES[g().pet] ?? '')}" autocomplete="off"></label>
-      <p class="small muted">비워 두면 기본 이름(토끼 몽실, 병아리 보리, 곰 도토리, 고양이 나비)으로 불러요.</p>
+      <label class="field">친구 이름<input id="set-name" class="text-input" maxlength="8" value="${esc(g().name || '')}" autocomplete="off" aria-describedby="set-name-hint"></label>
+      <p class="small muted" id="set-name-hint">비워 두면 ${esc(withRo(DEFAULT_NAMES[g().pet] ?? '친구'))} 불러요.</p>
     </section>
 
     <section class="card card-butter">
@@ -475,7 +476,8 @@ function renderSettings() {
       <h2>칼륨 주의 음식</h2>
       <p class="notice">⚠ 병원 기준으로 확인하세요.</p>
       <p class="small">여기 적은 이름이 들어간 음식을 적으면 부드럽게 알려 드려요. 기록은 막지 않아요.</p>
-      <textarea id="caution" class="text-input" rows="3" placeholder="쉼표로 나눠 적어 주세요">${esc(g().cautionWords.join(', '))}</textarea>
+      <label class="field" for="caution">주의 음식 이름 (쉼표로 나눠 적어 주세요)</label>
+      <textarea id="caution" class="text-input" rows="3">${esc(g().cautionWords.join(', '))}</textarea>
     </section>
     <button class="btn btn-primary" id="save-settings">설정 저장</button>
 
@@ -498,7 +500,7 @@ function renderSettings() {
   let growTiming = g().timing;
   view.querySelectorAll('[data-pet]').forEach((b) => b.addEventListener('click', () => {
     pet = b.dataset.pet;
-    $('#set-name').placeholder = DEFAULT_NAMES[pet];
+    $('#set-name-hint').textContent = `비워 두면 ${withRo(DEFAULT_NAMES[pet])} 불러요.`;
     view.querySelectorAll('[data-pet]').forEach((x) => {
       x.classList.toggle('on', x === b);
       x.setAttribute('aria-checked', String(x === b));

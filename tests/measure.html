@@ -72,16 +72,8 @@ async function measure(hash) {
     const c = ratio(rgba(cs.color), effectiveBg(el, win));
     if (c < minContrast) { minContrast = c; minContrastText = t.slice(0, 20); }
   }
-  // 빈 칸에 보이는 안내 글씨(placeholder)도 크기와 대비를 잰다
-  for (const el of doc.querySelectorAll('input[placeholder], textarea[placeholder]')) {
-    if (el.value || !el.placeholder || !visible(el, win)) continue;
-    const ps = win.getComputedStyle(el, '::placeholder');
-    const fs = parseFloat(ps.fontSize);
-    const label = `(안내) ${el.placeholder.slice(0, 14)}`;
-    if (fs < minFont) { minFont = fs; minFontText = label; }
-    const c = ratio(rgba(ps.color), effectiveBg(el, win));
-    if (c < minContrast) { minContrast = c; minContrastText = label; }
-  }
+  // 칸 안 안내 글씨(placeholder)는 쓰지 않는다. 안내는 칸 위의 진한 제목으로 보여 준다.
+  const placeholders = [...doc.querySelectorAll('[placeholder]')].map((el) => el.getAttribute('placeholder'));
   // 입력칸(input)은 바깥 label 크기가 아니라 칸 자체 크기를 잰다
   for (const el of doc.querySelectorAll('button, a.btn, .tabbar a, input:not([type=file]):not([type=checkbox]), .settings-link')) {
     if (!visible(el, win)) continue;
@@ -91,7 +83,7 @@ async function measure(hash) {
   }
   const body = parseFloat(win.getComputedStyle(doc.body).fontSize);
   return { screen: hash, bodyFont: body, minFont, minFontText, minContrast: Math.round(minContrast * 100) / 100, minContrastText,
-    minTarget: Math.round(minTarget), minTargetText };
+    minTarget: Math.round(minTarget), minTargetText, placeholders };
 }
 
 const rows = [];

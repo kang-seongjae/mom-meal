@@ -73,7 +73,7 @@ python -I tools/screenshots.py docs/screenshots   # 390x844 폰 화면 캡처
 
 - `tests/test.html`: 성장 단계(0.5kg·목표 도착·줄어도 유지·측정 시점), 오늘 횟수, 자주 먹은 음식, 보상, 칼륨 주의 단어, 친구 그림, 백업(키우기 정보·예전 백업·설정만 내보내기) 등
 - `tests/e2e.html`: 실제 화면에서 처음 시작(예전 기록 이어받기), 음식 적기·다 채우기·지우기, 칼륨 주의, 성장·줄어든 날·다른 시점·목표 도착, 기록 화면과 몸무게 지우기, 백업 내보내기·새 폰에서 불러오기
-- `tests/measure.html`: 화면마다 글씨(빈 칸의 안내 글씨 포함) 19px·대비 7:1·버튼 48px 아래로 내려가면 실패
+- `tests/measure.html`: 화면마다 글씨 19px·대비 7:1·버튼 48px 아래로 내려가거나, 칸 안에 안내 글씨(placeholder)가 있으면 실패 (안내는 칸 위의 진한 제목으로 보여 줌)
 - `tests/seed.html`, `tests/pets.html`, `tests/frame.html`: 스크린샷용 예시 기록·친구 모음·폰 너비 틀(테스트 전용)
 
 ## 배포할 때

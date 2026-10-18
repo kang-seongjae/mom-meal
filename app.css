@@ -404,6 +404,7 @@ body.onboarding .tabbar { display: none; }
 .slot-extra { font-size: 1.2rem; font-weight: 800; color: var(--accent-text); }
 
 .note-form { display: flex; flex-direction: column; gap: 4px; }
+.note-form .field { margin: 0; }
 .note-form .text-input { min-height: 64px; font-size: 1.25rem; border-radius: 999px; padding: 12px 20px; }
 .note-form .btn-primary { margin: 6px 0 10px; }
 .quick { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 12px; }
@@ -425,8 +426,6 @@ textarea.text-input { min-height: 104px; border-radius: 20px; resize: vertical; 
 .celebrate-title { font-size: 1.5rem; font-weight: 800; }
 .celebrate-sub { font-size: 1.15rem; font-weight: 600; color: var(--ink-2); }
 
-/* 빈 칸의 안내 글씨도 진하게 (흰 바탕 7.6:1, 크림 바탕 7.2:1) */
-::placeholder { color: #545454; opacity: 1; }
 .name-card { text-align: center; }
 .name-card .field { text-align: left; }
 .pet-call { color: var(--accent-text); }
